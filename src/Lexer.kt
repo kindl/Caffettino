@@ -8,6 +8,10 @@ sealed class Token {
 }
 
 
+fun isSignificant(t: Token) : Boolean {
+    return !(t is Token.WhitespaceToken || t is Token.CommentToken)
+}
+
 // TODO escape sequences
 val stringToken: Parser<String, Token> =
     map3(
@@ -17,13 +21,13 @@ val stringToken: Parser<String, Token> =
         satisfyChar { it == '\"' })
 
 val numberToken: Parser<String, Token> =
-    mapMaybe({ it.toDoubleOrNull()?.let { Token.NumberToken(it) } }, takeWhile { it.isDigit() })
+    mapNullable({ it.toDoubleOrNull()?.let { Token.NumberToken(it) } }, takeWhile { it.isDigit() })
 
 val dotsAndParens = listOf(".", ",", ";", "(", ")", "[", "]", "{", "}")
 val operators = listOf("==", "<=", ">=", "!=", "&&", "||", "!", "^", "?", ":", "+", "-", "*", "/", "%", "<", ">", "=")
 
 val fixed: Parser<String, Token> =
-    map({ Token.FixedToken(it) }, choice((dotsAndParens + operators).map { startsWith(it) }))
+    map({ Token.FixedToken(it) }, choice((dotsAndParens + operators).map { takeString(it) }))
 
 val identifierOrFixed: Parser<String, Token> =
     map2(
@@ -34,7 +38,7 @@ val identifierOrFixed: Parser<String, Token> =
 val keywords = listOf("return", "let", "fn", "true", "false", "import")
 
 val comment: Parser<String, Token> =
-    map2({ _, c -> Token.CommentToken(c) }, startsWith("//"), takeWhile { it != '\n' })
+    map2({ _, c -> Token.CommentToken(c) }, takeString("//"), takeWhile { it != '\n' })
 
 val whitespace: Parser<String, Token> =
     map2({ a, b -> Token.WhitespaceToken(a + b) }, satisfyChar { it.isWhitespace() }, takeWhile { it.isWhitespace() })
@@ -50,5 +54,5 @@ fun identifierOrFixedToken(s: String): Token {
 val lexeme = choice(listOf(comment, whitespace, stringToken, numberToken, fixed, identifierOrFixed))
 
 fun lex(string: String): List<Token>? {
-    return parseStringTilEnd(many(lexeme), string)
+    return parseStringTilEnd(many(lexeme), string)?.filter { isSignificant(it) }
 }

@@ -3,13 +3,38 @@ sealed class Expression {
     data class NumberLiteral(val number: Double) : Expression()
     data class BooleanLiteral(val bool: Boolean) : Expression()
     data class Call(val function: Expression, val arguments: List<Expression>) : Expression()
-    data class Variable(val name: String) : Expression()
-    data class Dot(val expression: Expression, val name: String) : Expression()
-    data class Function(val name: String, val parameters: List<String>, val body: List<Expression>) : Expression()
-    data class Let(val name: String, val expression: Expression) : Expression()
+    data class Variable(val name: Name) : Expression()
+    data class Dot(val expression: Expression, val name: Name) : Expression()
+    data class Return(val expression: Expression?) : Expression()
+    data class If(val condition: Expression, val thenBranch: List<Expression>, val elseBranch: List<Expression>?) :
+        Expression()
+
     data class Import(val path: List<String>) : Expression()
-    data class Return(val expression: Expression) : Expression()
+    data class Let(val name: Name, val expression: Expression) : Expression()
+    data class Function(val name: Name, val parameters: List<Name>, val body: List<Expression>) : Expression()
 }
+
+fun pretty(e: Expression): String {
+    return when (e) {
+        is Expression.BooleanLiteral -> TODO()
+        is Expression.Call -> pretty(e.function) + "(" + e.arguments.joinToString { pretty(it) } + ")"
+        is Expression.Dot -> pretty(e.expression) + "." + e.name.identifier
+        is Expression.Function ->
+            ("fn " + e.name.identifier + "(" + e.parameters.joinToString { it.identifier } + ") {\n"
+                    + e.body.joinToString("\n", transform = { "\t" + pretty(it) }) + "\n}")
+
+        is Expression.If -> TODO()
+        is Expression.Import -> "import " + e.path.joinToString(".")
+        is Expression.Let -> "let " + e.name.identifier + " = " + pretty(e.expression)
+        is Expression.NumberLiteral -> TODO()
+        is Expression.Return -> "return " + e.expression?.let { pretty(it) }
+        is Expression.StringLiteral -> "\"" + e.string + "\""
+        is Expression.Variable -> e.name.identifier
+    }
+}
+
+
+data class Name(val identifier: String, val type: Type)
 
 
 val next: Parser<Collection<Token>, Token> = satisfy { true }
@@ -46,19 +71,16 @@ val numberLiteral: Parser<Collection<Token>, Expression> = filterToken {
     }
 }
 
-val variable: Parser<Collection<Token>, Expression> = filterToken {
-    when (it) {
-        is Token.IdentifierToken -> Expression.Variable(it.string)
-        else -> null
-    }
-}
-
 val identifier = filterToken {
     when (it) {
         is Token.IdentifierToken -> it.string
         else -> null
     }
 }
+
+val name = map({ Name(it, any) }, identifier)
+
+val variable: Parser<Collection<Token>, Expression> = map({ Expression.Variable(it) }, name)
 
 val booleanLiteral: Parser<Collection<Token>, Expression> =
     or(
@@ -81,7 +103,7 @@ val callFn: Parser<Collection<Token>, (Expression) -> Expression> =
     map({ arguments: List<Expression> -> { e: Expression -> Expression.Call(e, arguments) } }, parens(many(expr)))
 
 val dotFn: Parser<Collection<Token>, (Expression) -> Expression> =
-    map({ id -> { e: Expression -> Expression.Dot(e, id) } }, second(token("."), identifier))
+    map({ name -> { e: Expression -> Expression.Dot(e, name) } }, second(token("."), name))
 
 val primaryExpression: Parser<Collection<Token>, Expression> =
     choice(listOf(booleanLiteral, stringLiteral, numberLiteral, variable, parens(expr)))
@@ -97,20 +119,28 @@ val call: Parser<Collection<Token>, Expression> = mapNullable({
 }, composedExpression)
 
 val let: Parser<Collection<Token>, Expression> = map2(
-    { id, expression -> Expression.Let(id, expression) },
-    second(token("let"), identifier), second(token("="), expr)
+    { name, expression -> Expression.Let(name, expression) },
+    second(token("let"), name), second(token("="), expr)
 )
 
 val ret: Parser<Collection<Token>, Expression> = map(
     { expression -> Expression.Return(expression) },
-    second(token("return"), expr)
+    second(token("return"), optional(expr))
 )
 
-val bodyExpression = choice(listOf(let, call, ret))
+// The block could be adapted to allow return only at the end
+val block = defer { braces(many(bodyExpression)) }
+
+val ifExpression: Parser<Collection<Token>, Expression> = map3(
+    { condition, th, el -> Expression.If(condition, th, el) },
+    second(token("if"), parens(expr)), block, second(token("else"), block)
+)
+
+val bodyExpression = choice(listOf(let, call, ret, ifExpression))
 
 val function: Parser<Collection<Token>, Expression> = map3(
-    { id, parameters, expressions -> Expression.Function(id, parameters, expressions) },
-    second(token("fn"), identifier), parens(sepByTrailing(identifier, token(","))), braces(many(bodyExpression))
+    { name, parameters, expressions -> Expression.Function(name, parameters, expressions) },
+    second(token("fn"), name), parens(sepByTrailing(name, token(","))), block
 )
 
 val import: Parser<Collection<Token>, Expression> = map(
@@ -118,7 +148,7 @@ val import: Parser<Collection<Token>, Expression> = map(
     second(token("import"), sepBy1(identifier, token(".")))
 )
 
-val topExpression = choice(listOf(function, let, import))
+val topExpression = choice(listOf(import, let, function))
 
 fun parse(string: String): List<Expression>? {
     val tokens = lex(string)

@@ -35,7 +35,7 @@ val identifierOrFixed: Parser<String, Token> =
         satisfyChar { it.isLetter() },
         takeWhile { it.isLetterOrDigit() })
 
-val keywords = listOf("return", "let", "fn", "true", "false", "import")
+val keywords = listOf("return", "let", "fn", "true", "false", "import", "if", "else")
 
 val comment: Parser<String, Token> =
     map2({ _, c -> Token.CommentToken(c) }, takeString("//"), takeWhile { it != '\n' })

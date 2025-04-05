@@ -5,6 +5,13 @@ sealed class Type {
 
 val any = Type.Concrete("Any")
 
+fun makeConcrete(path: String): Type.Concrete {
+    return if (path == "java/lang/Object") {
+        any
+    } else {
+        Type.Concrete(path)
+    }
+}
 
 val parseI = map({ Type.Concrete("int") }, takeString("I"))
 val parseJ = map({ Type.Concrete("long") }, takeString("J"))
@@ -15,7 +22,7 @@ val parseC = map({ Type.Concrete("char") }, takeString("C"))
 val parseF = map({ Type.Concrete("float") }, takeString("F"))
 val parseD = map({ Type.Concrete("double") }, takeString("D"))
 val parseL = map3(
-    { _, path, _ -> Type.Concrete(path) },
+    { _, path, _ -> makeConcrete(path) },
     takeString("L"), takeWhile { it.isLetterOrDigit() || it == '/' }, takeString(";")
 )
 

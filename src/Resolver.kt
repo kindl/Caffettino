@@ -8,24 +8,24 @@ typealias Environment = Map<String, Type>
 fun resolveFile(expressions: List<Expression>): List<Expression> {
     var environment = mapOf<String, Type>()
 
-    return expressions.map {
-        when (it) {
+    return expressions.map { expression ->
+        when (expression) {
             is Expression.Function -> {
-                val resolved = resolveFunction(it, environment)
+                val resolved = resolveFunction(expression, environment)
                 environment = environment + Pair(resolved.name.identifier, resolved.name.type)
                 resolved
             }
 
             is Expression.Import -> {
-                val path = it.path.joinToString("/")
+                val path = expression.path.joinToString("/")
                 val classFile = getClassFile(path)
                 // TODO decide how to add classes to the env
-                environment = environment + Pair(it.path.last(), Type.Concrete(path))
-                it
+                environment = environment + Pair(expression.path.last(), Type.Concrete(path))
+                expression
             }
 
             is Expression.Let -> {
-                val resolved = resolveLet(it, environment)
+                val resolved = resolveLet(expression, environment)
                 environment = environment + Pair(resolved.name.identifier, resolved.name.type)
                 resolved
             }
@@ -44,17 +44,11 @@ fun resolveLet(let: Expression.Let, environment: Environment): Expression.Let {
 
 fun resolveExpression(expression: Expression, environment: Environment): Expression {
     return when (expression) {
-        is Expression.BooleanLiteral -> expression
-        is Expression.NumberLiteral -> expression
-        is Expression.StringLiteral -> expression
+        is Expression.Lit -> expression
         is Expression.Call -> resolveCall(expression, environment)
         is Expression.Dot -> resolveDot(expression, environment)
         is Expression.Variable -> resolveVariable(expression, environment)
-        is Expression.If -> TODO()
-        is Expression.Let -> TODO()
-        is Expression.Return -> TODO()
-        is Expression.Function -> TODO()
-        is Expression.Import -> TODO()
+        else -> error("Expression " + expression + " not allowed at this level")
     }
 }
 
@@ -70,7 +64,11 @@ fun resolveReturn(expression: Expression.Return, environment: Environment): Expr
 fun resolveIf(ifExpression: Expression.If, environment: Environment): Expression.If {
     val condition = resolveExpression(ifExpression.condition, environment)
     val thenBranch = resolveBlock(ifExpression.thenBranch, environment)
-    val elseBranch = resolveBlock(ifExpression.elseBranch ?: TODO(), environment)
+    val elseBranch = if (ifExpression.elseBranch != null) {
+        resolveBlock(ifExpression.elseBranch, environment)
+    } else {
+        null
+    }
 
     return Expression.If(
         condition,
@@ -81,35 +79,88 @@ fun resolveIf(ifExpression: Expression.If, environment: Environment): Expression
 
 fun resolveCall(call: Expression.Call, environment: Environment): Expression.Call {
     val resolvedArguments = call.arguments.map { resolveExpression(it, environment) }
-    val argumentTypes = resolvedArguments.map { readType(it) }
-    val resolvedExpression = when (call.function) {
-        is Expression.Dot -> resolveDotCall(call.function, environment, argumentTypes)
+
+    return when (call.function) {
+        is Expression.Dot -> resolveDotCall(call.function, environment, resolvedArguments)
         // TODO add a variant of resolveVariable that takes argumentTypes as parameter
         // to find the correct overload
-        is Expression.Variable -> resolveVariable(call.function, environment)
-        else -> resolveExpression(call.function, environment)
+        is Expression.Variable -> Expression.Call(resolveVariable(call.function, environment), resolvedArguments)
+        else -> error("Non call " + call.function + " in call")
     }
-
-    return Expression.Call(resolvedExpression, resolvedArguments)
 }
 
 fun readType(expression: Expression): Type {
     return when (expression) {
-        is Expression.BooleanLiteral -> Type.Concrete("boolean")
+        is Expression.Lit -> readType(expression.literal)
         is Expression.Call -> (readType(expression.function) as Type.Arrow).returnType
         is Expression.Dot -> expression.name.type
-        is Expression.StringLiteral -> Type.Concrete("java/lang/String")
         is Expression.Variable -> expression.name.type
         else -> TODO()
     }
 }
 
-fun resolveDotCall(dot: Expression.Dot, environment: Environment, argumentTypes: List<Type>): Expression {
+fun readType(literal: Literal): Type {
+    return when (literal) {
+        is Literal.BooleanLiteral -> Type.Concrete("bool")
+        is Literal.StringLiteral -> Type.Concrete("java/lang/String")
+        is Literal.IntLiteral -> Type.Concrete("int")
+        is Literal.DoubleLiteral -> Type.Concrete("double")
+        is Literal.FloatLiteral -> Type.Concrete("float")
+        is Literal.LongLiteral -> Type.Concrete("long")
+    }
+}
+
+fun resolveDotCall(
+    dot: Expression.Dot,
+    environment: Environment,
+    resolvedArguments: List<Expression>
+): Expression.Call {
     val resolvedExpression = resolveExpression(dot.expression, environment)
     val leftType = readType(resolvedExpression)
+
+    if (!isPrimitive(leftType) && resolvedArguments.count() == 1) {
+        if (isComparison(dot.name.identifier)) {
+            return makeComparison(dot.name.identifier, resolvedExpression, resolvedArguments.first())
+        } else if (dot.name.identifier == "notEquals") {
+            return makeNotEquals(resolvedExpression, resolvedArguments.first())
+        }
+    }
+
+    val argumentTypes = resolvedArguments.map { readType(it) }
     val accessorType = getMethodType(leftType, dot.name.identifier, argumentTypes)
     val newName = Name(dot.name.identifier, accessorType)
-    return Expression.Dot(resolvedExpression, newName)
+    return Expression.Call(Expression.Dot(resolvedExpression, newName), resolvedArguments)
+}
+
+// rewrite a.greaterOrEqual(b) to a.compareTo(b) >= 0
+fun makeComparison(identifier: String, left: Expression, right: Expression): Expression.Call {
+    val compareToType = Type.Arrow(Type.Concrete("int"), listOf(any))
+    val intCompareType = Type.Arrow(Type.Concrete("int"), listOf(Type.Concrete("int")))
+    val compareTo = Expression.Call(Expression.Dot(left, Name("compareTo", compareToType)), listOf(right))
+    return Expression.Call(
+        Expression.Dot(compareTo, Name(identifier, intCompareType)),
+        listOf(Expression.Lit(Literal.IntLiteral(0)))
+    )
+}
+
+// rewrite a.notEquals(b) to a.equals(b).not()
+fun makeNotEquals(left: Expression, right: Expression): Expression.Call {
+    val equalsType = Type.Arrow(Type.Concrete("bool"), listOf(any))
+    val notType = Type.Arrow(Type.Concrete("bool"), listOf())
+    val equalsPart = Expression.Call(Expression.Dot(left, Name("equals", equalsType)), listOf(right))
+    return Expression.Call(Expression.Dot(equalsPart, Name("not", notType)), listOf())
+}
+
+fun isPrimitive(type: Type): Boolean {
+    return listOf(
+        Type.Concrete("int"), Type.Concrete("long"),
+        Type.Concrete("float"), Type.Concrete("double"),
+        Type.Concrete("bool")
+    ).contains(type)
+}
+
+fun isComparison(identifier: String): Boolean {
+    return listOf("lesser", "lesserOrEqual", "greater", "greaterOrEqual").contains(identifier)
 }
 
 fun resolveDot(dot: Expression.Dot, environment: Environment): Expression {
@@ -120,25 +171,57 @@ fun resolveDot(dot: Expression.Dot, environment: Environment): Expression {
     return Expression.Dot(resolvedExpression, newName)
 }
 
+// TODO read pseudo class file for primitive types
+// Something like 1+2 becomes 1.plus(2)
+// plus is then annotated
+
+// TODO equals is a little bit special, because for example "Hi" == "there" will turn into
+// "Hi".equals("there") and then we can't find an overload, because the argument is string and not object
+// Solutions would be
+// * auto conversion "Hi".equals(toObject("there"))
+// * special case for equals, we might need this anyway for primitive types
+// * some form of subtyping. If we can't find a function with a string argument, turn it into object and search again
+//   this could explode quickly, but we might only need to do it for strings
 fun getMethodType(type: Type, accessor: String, argumentTypes: List<Type>): Type {
+    if (isPrimitive(type)) {
+        when (accessor) {
+            "plus", "minus" -> return Type.Arrow(type, listOf(type))
+            "equals" -> return Type.Arrow(Type.Concrete("bool"), listOf(type))
+            "not" -> return Type.Arrow(Type.Concrete("bool"), listOf())
+            "compareTo" -> return Type.Arrow(Type.Concrete("int"), listOf(type))
+            "lesserOrEqual" -> return Type.Arrow(Type.Concrete("int"), listOf(type))
+            "lesser" -> return Type.Arrow(Type.Concrete("int"), listOf(type))
+            "greaterOrEqual" -> return Type.Arrow(Type.Concrete("int"), listOf(type))
+            "greater" -> return Type.Arrow(Type.Concrete("int"), listOf(type))
+            else -> error("Can't find method type for primitive " + type + " " + accessor)
+        }
+    }
+
     val path = (type as Type.Concrete).name
     val classFile = getClassFile(path)
     val options = classFile.methods().filter { it.methodName().stringValue() == accessor }
     val overloads = options.map { convertMethodType(it.methodType().stringValue()) }
+
+    if (accessor == "equals") {
+        return overloads.first()
+    }
+
     val methodType = overloads.firstOrNull { it.parameterTypes == argumentTypes }
 
-    return methodType ?: throw Exception("Cannot find fitting overload for " + argumentTypes + " in " + overloads)
+    return methodType
+        ?: error("Cannot find fitting overload for " + accessor + " with arguments " + argumentTypes + " in " + overloads)
 }
 
 fun getClassFile(path: String): ClassModel {
-    println("Looking for " + path)
     // TODO find class by path, and allow non-system imports like import kotlin.io.Console
-    val stream = if (path.startsWith("java/")) {
+    val stream = if (path == "Any") {
+        ClassLoader.getSystemResourceAsStream("java/lang/Object.class")
+    } else if (path.startsWith("java/")) {
         ClassLoader.getSystemResourceAsStream(path + ".class")
     } else if (path.startsWith("kotlin/")) {
         Any::class.java.getResourceAsStream(path + ".class")
     } else {
-        throw Exception("Path not searchable " + path)
+        error("Path not searchable " + path)
     }
 
     val classFile = ClassFile.of().parse(stream.readAllBytes())
@@ -147,16 +230,24 @@ fun getClassFile(path: String): ClassModel {
 
 // TODO non-static field access
 fun getAccessorType(type: Type, accessor: String): Type {
-    val path = (type as Type.Concrete).name
+    val name = (type as Type.Concrete).name
+    val path = if (name == "Any") {
+        "java/lang/Object"
+    } else {
+        name
+    }
+
     val classFile = getClassFile(path)
-    val options =
-        classFile.fields().filter { it.flags().has(AccessFlag.STATIC) && it.fieldName().stringValue() == accessor }
+    val options = classFile.fields().filter {
+        it.flags().has(AccessFlag.STATIC) && it.fieldName().stringValue() == accessor
+    }
+
     val stringValue = options.first().fieldType().stringValue()
     return convertFieldType(stringValue)
 }
 
 fun resolveVariable(variable: Expression.Variable, environment: Environment): Expression.Variable {
-    val type = environment[variable.name.identifier] ?: throw Exception("Not found " + variable.name.identifier)
+    val type = environment[variable.name.identifier] ?: error("Not found " + variable.name.identifier)
     return Expression.Variable(Name(variable.name.identifier, type))
 }
 
@@ -181,19 +272,13 @@ fun resolveBlock(expressions: List<Expression>, startEnvironment: Environment): 
 }
 
 fun getReturnType(expressions: List<Expression>): Type? {
-    val types = expressions.mapNotNull {
-        when (it) {
-            is Expression.Return -> if (it.expression != null) {
-                readType(it.expression)
-            } else {
-                Type.Concrete("void")
-            }
+    val types = expressions.mapNotNull { expression ->
+        when (expression) {
+            is Expression.Return ->
+                expression.expression?.let { readType(it) } ?: Type.Concrete("void")
 
-            is Expression.If -> getReturnType(it.thenBranch) ?: (if (it.elseBranch != null) {
-                getReturnType(it.elseBranch)
-            } else {
-                null
-            })
+            is Expression.If ->
+                getReturnType(expression.thenBranch) ?: expression.elseBranch?.let { getReturnType(it) }
 
             else -> null
         }

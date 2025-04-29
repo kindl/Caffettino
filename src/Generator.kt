@@ -43,7 +43,7 @@ fun generateFile(classBuilder: ClassBuilder, classDescriptor: ClassDesc, express
             is Expression.Let -> generateStaticFieldDescription(classBuilder, expression)
             // Nothing to do for imports
             is Expression.Import -> {}
-            else -> TODO("Expression at top level not allowed " + expression)
+            else -> error("Generating expression " + expression + " not allowed at top level of a file")
         }
     }
 }
@@ -77,6 +77,10 @@ fun generateStaticConstructor(classBuilder: ClassBuilder, classDescriptor: Class
 }
 
 fun generateStaticFieldAssignment(context: Context, expression: Expression.Let) {
+    if (expression.name.type == Type.Concrete("void")) {
+        error("Cannot set static field " + expression.name + " with a void type")
+    }
+
     generateExpression(context, expression.expression)
     val type = getClassDescriptor(expression.name.type)
     context.codeBuilder.putstatic(context.classDescriptor, expression.name.identifier, type)
@@ -113,8 +117,7 @@ fun endsWithReturn(expressions: List<Expression>): Boolean {
 }
 
 fun gatherLocals(expressions: List<Expression>): List<Name> {
-    var locals = listOf<Name>()
-    for (expression in expressions) {
+    val locals = expressions.flatMap { expression ->
         when (expression) {
             is Expression.If -> {
                 val thenLocals = gatherLocals(expression.thenBranch)
@@ -123,14 +126,12 @@ fun gatherLocals(expressions: List<Expression>): List<Name> {
                 } else {
                     listOf()
                 }
-                locals = locals + thenLocals + elseLocals
+
+                thenLocals + elseLocals
             }
 
-            is Expression.Let -> {
-                locals = locals + expression.name
-            }
-
-            else -> {}
+            is Expression.Let -> listOf(expression.name)
+            else -> listOf()
         }
     }
 
@@ -144,7 +145,7 @@ fun generateBlock(context: Context, expressions: List<Expression>) {
             is Expression.If -> generateIf(context, expression)
             is Expression.Let -> generateLet(context, expression)
             is Expression.Return -> generateReturn(context, expression)
-            else -> TODO()
+            else -> error("Generating expression " + expression + " not allowed inside block")
         }
     }
 }
@@ -163,6 +164,7 @@ fun generateReturn(context: Context, expression: Expression.Return) {
 // TODO probably has to return the context so that we can keep track of changes
 // TODO avoid adding locals several times
 fun generateIf(startContext: Context, ifExpression: Expression.If) {
+    generateExpression(startContext, ifExpression.condition)
     if (ifExpression.elseBranch != null) {
         startContext.codeBuilder.ifThenElse({
             val context = Context(it, startContext.classDescriptor, startContext.locals)
@@ -183,6 +185,10 @@ fun generateLet(context: Context, let: Expression.Let) {
     generateExpression(context, let.expression)
     val index = context.locals.indexOfFirst { let.name.identifier == it.identifier }
     val typeKind = getTypeKind(let.name.type)
+    if (typeKind == TypeKind.VoidType) {
+        error("Cannot assign field " + let.name + " with a void type")
+    }
+
     context.codeBuilder.storeLocal(typeKind, index)
 }
 
@@ -190,7 +196,7 @@ fun generateCall(context: Context, call: Expression.Call) {
     when (call.function) {
         is Expression.Variable -> generateVariableCall(context, call.function, call.arguments)
         is Expression.Dot -> generateDotCall(context, call.function, call.arguments)
-        else -> TODO()
+        else -> error("Expression " + pretty(call) + " cannot be called directly")
     }
 }
 
@@ -211,44 +217,101 @@ fun generateDotCall(context: Context, dot: Expression.Dot, arguments: List<Expre
     val ownerType = readType(dot.expression)
     val ownerTypeDescriptor = getClassDescriptor(ownerType)
 
-    // TODO invokeinterface
-    if (isStatic(dot)) {
-        for (expression in arguments) {
-            generateExpression(context, expression)
-        }
-
-        context.codeBuilder.invokestatic(ownerTypeDescriptor, dot.name.identifier, methodTypeDescriptor)
-    } else {
+    if (isVirtual(dot)) {
         // generate the expression part, for example
         // the System.out in System.out.println
         generateExpression(context, dot.expression)
-        for (expression in arguments) {
-            generateExpression(context, expression)
-        }
+    }
 
+    for (expression in arguments) {
+        generateExpression(context, expression)
+    }
+
+    // TODO invokeinterface
+
+    if (ownerTypeDescriptor.descriptorString() == "I") {
+        when (dot.name.identifier) {
+            "equals" -> context.codeBuilder.ifThenElse(Opcode.IF_ICMPEQ, { it.iconst_1() }, { it.iconst_0() })
+            "greaterOrEqual" -> context.codeBuilder.ifThenElse(Opcode.IF_ICMPGE, { it.iconst_1() }, { it.iconst_0() })
+            "greater" -> context.codeBuilder.ifThenElse(Opcode.IF_ICMPGT, { it.iconst_1() }, { it.iconst_0() })
+            "lesserOrEqual" -> context.codeBuilder.ifThenElse(Opcode.IF_ICMPLE, { it.iconst_1() }, { it.iconst_0() })
+            "lesser" -> context.codeBuilder.ifThenElse(Opcode.IF_ICMPLT, { it.iconst_1() }, { it.iconst_0() })
+            "plus" -> context.codeBuilder.iadd()
+            "minus" -> context.codeBuilder.isub()
+            "times" -> context.codeBuilder.imul()
+            "div" -> context.codeBuilder.idiv()
+            "rem" -> context.codeBuilder.irem()
+            else -> error("Unknown primitive int call " + dot.name)
+        }
+    } else if (ownerTypeDescriptor.descriptorString() == "F") {
+        // fcmpl and fcmpg seem switched in these branches, but lead to the correct output in the disassembly
+        when (dot.name.identifier) {
+            "equals" -> {
+                context.codeBuilder.fcmpl()
+                context.codeBuilder.ifThenElse({ it.iconst_1() }, { it.iconst_0() })
+            }
+
+            "greaterOrEqual" -> {
+                context.codeBuilder.fcmpl()
+                context.codeBuilder.ifThenElse(Opcode.IFGE, { it.iconst_1() }, { it.iconst_0() })
+            }
+
+            "greater" -> {
+                context.codeBuilder.fcmpl()
+                context.codeBuilder.ifThenElse(Opcode.IFGT, { it.iconst_1() }, { it.iconst_0() })
+            }
+
+            "lesserOrEqual" -> {
+                context.codeBuilder.fcmpg()
+                context.codeBuilder.ifThenElse(Opcode.IFLE, { it.iconst_1() }, { it.iconst_0() })
+            }
+
+            "lesser" -> {
+                context.codeBuilder.fcmpg()
+                context.codeBuilder.ifThenElse(Opcode.IFLT, { it.iconst_1() }, { it.iconst_0() })
+            }
+
+            "plus" -> context.codeBuilder.fadd()
+            "minus" -> context.codeBuilder.fsub()
+            "times" -> context.codeBuilder.fmul()
+            "div" -> context.codeBuilder.fdiv()
+            "rem" -> context.codeBuilder.frem()
+            else -> error("Unknown primitive float call " + dot.name)
+        }
+    } else if (ownerTypeDescriptor.descriptorString() == "Z") {
+        when (dot.name.identifier) {
+            "not" -> context.codeBuilder.ifThenElse(Opcode.IFEQ, { it.iconst_1() }, { it.iconst_0() })
+        }
+    } else if (isVirtual(dot)) {
         context.codeBuilder.invokevirtual(ownerTypeDescriptor, dot.name.identifier, methodTypeDescriptor)
+    } else {
+        context.codeBuilder.invokestatic(ownerTypeDescriptor, dot.name.identifier, methodTypeDescriptor)
     }
 }
 
-fun generateExpression(context: Context, expression: Expression) {
-    when (expression) {
-        is Expression.BooleanLiteral -> if (expression.bool) {
+fun generateLiteral(context: Context, literal: Literal) {
+    when (literal) {
+        is Literal.BooleanLiteral -> if (literal.bool) {
             context.codeBuilder.iconst_1()
         } else {
             context.codeBuilder.iconst_0()
         }
 
+        is Literal.StringLiteral -> context.codeBuilder.loadConstant(literal.string as ConstantDesc)
+        is Literal.IntLiteral -> context.codeBuilder.loadConstant(literal.number as ConstantDesc)
+        is Literal.DoubleLiteral -> context.codeBuilder.loadConstant(literal.number as ConstantDesc)
+        is Literal.FloatLiteral -> context.codeBuilder.loadConstant(literal.number as ConstantDesc)
+        is Literal.LongLiteral -> context.codeBuilder.loadConstant(literal.number as ConstantDesc)
+    }
+}
+
+fun generateExpression(context: Context, expression: Expression) {
+    when (expression) {
+        is Expression.Lit -> generateLiteral(context, expression.literal)
         is Expression.Call -> generateCall(context, expression)
         is Expression.Variable -> generateVariable(context, expression)
         is Expression.Dot -> generateDot(context, expression)
-        is Expression.If -> TODO()
-        is Expression.Let -> TODO()
-        is Expression.NumberLiteral -> context.codeBuilder.ldc(expression.number as ConstantDesc)
-        is Expression.Return -> TODO()
-        is Expression.StringLiteral -> context.codeBuilder.ldc(expression.string as ConstantDesc)
-        // Not allowed
-        is Expression.Function -> TODO()
-        is Expression.Import -> TODO()
+        else -> error("Generating expression " + expression + " not allowed at this level")
     }
 }
 
@@ -256,6 +319,10 @@ fun generateVariable(context: Context, variable: Expression.Variable) {
     val index = context.locals.indexOfFirst { variable.name.identifier == it.identifier }
     if (index != -1) {
         val typeKind = getTypeKind(variable.name.type)
+        if (typeKind == TypeKind.VoidType) {
+            error("Cannot get a field " + variable.name + " with a void type")
+        }
+
         context.codeBuilder.loadLocal(typeKind, index)
     } else {
         val fieldType = getClassDescriptor(variable.name.type)
@@ -278,9 +345,9 @@ fun generateDot(context: Context, dot: Expression.Dot) {
     }
 }
 
-fun getClassDescriptor(t: Type): ClassDesc {
-    return when (t) {
-        is Type.Concrete -> when (t.name) {
+fun getClassDescriptor(type: Type): ClassDesc {
+    return when (type) {
+        is Type.Concrete -> when (type.name) {
             "void" -> ConstantDescs.CD_void
             "int" -> ConstantDescs.CD_int
             "long" -> ConstantDescs.CD_long
@@ -289,19 +356,20 @@ fun getClassDescriptor(t: Type): ClassDesc {
             "short" -> ConstantDescs.CD_short
             "byte" -> ConstantDescs.CD_byte
             "char" -> ConstantDescs.CD_char
-            "boolean" -> ConstantDescs.CD_boolean
+            "bool" -> ConstantDescs.CD_boolean
             "Any" -> ConstantDescs.CD_Object
             else ->
-                if (t.name.startsWith("[") && t.name.endsWith("]")) {
+                if (type.name.startsWith("[") && type.name.endsWith("]")) {
                     // TODO handle array or arrays
-                    val innerName = t.name.substring(1, t.name.length - 1)
+                    val innerName = type.name.substring(1, type.name.length - 1)
                     ClassDesc.ofInternalName(innerName).arrayType()
                 } else {
                     // ofInternalName works on names with slashes
-                    ClassDesc.ofInternalName(t.name)
+                    ClassDesc.ofInternalName(type.name)
                 }
         }
-        else -> TODO("Cannot turn into concrete type")
+
+        else -> error("Cannot turn type " + type + " into concrete type")
     }
 }
 
@@ -316,10 +384,11 @@ fun getTypeKind(type: Type): TypeKind {
             "short" -> TypeKind.ShortType
             "byte" -> TypeKind.ByteType
             "char" -> TypeKind.CharType
-            "boolean" -> TypeKind.BooleanType
+            "bool" -> TypeKind.BooleanType
             else -> TypeKind.ReferenceType
         }
-        else -> TODO("Cannot turn into type kind")
+
+        else -> error("Cannot turn type " + type + " into type kind")
     }
 }
 
@@ -331,9 +400,15 @@ fun isStatic(dot: Expression.Dot): Boolean {
     }
 }
 
+fun isVirtual(dot: Expression.Dot): Boolean {
+    return !isStatic(dot)
+}
+
 fun getMethodTypeDescriptor(name: Name): MethodTypeDesc {
     return when (name.type) {
-        is Type.Arrow -> MethodTypeDesc.of(getClassDescriptor(name.type.returnType), name.type.parameterTypes.map { getClassDescriptor(it) })
-        is Type.Concrete -> TODO("Unexpected type " + name.type.name + " for function " + name.identifier)
+        is Type.Arrow -> MethodTypeDesc.of(
+            getClassDescriptor(name.type.returnType),
+            name.type.parameterTypes.map { getClassDescriptor(it) })
+        is Type.Concrete -> error("Unexpected type " + name.type.name + " for function " + name.identifier)
     }
 }

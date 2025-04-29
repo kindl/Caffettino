@@ -1,6 +1,9 @@
 sealed class Token {
     data class StringToken(val string: String) : Token()
-    data class NumberToken(val number: Double) : Token()
+    data class IntToken(val number: Int) : Token()
+    data class LongToken(val number: Long) : Token()
+    data class FloatToken(val number: Float) : Token()
+    data class DoubleToken(val number: Double) : Token()
     data class IdentifierToken(val string: String) : Token()
     data class FixedToken(val string: String) : Token()
     data class WhitespaceToken(val string: String) : Token()
@@ -8,7 +11,7 @@ sealed class Token {
 }
 
 
-fun isSignificant(t: Token) : Boolean {
+fun isSignificant(t: Token): Boolean {
     return !(t is Token.WhitespaceToken || t is Token.CommentToken)
 }
 
@@ -20,8 +23,41 @@ val stringToken: Parser<String, Token> =
         takeWhile { it != '\"' },
         satisfyChar { it == '\"' })
 
-val numberToken: Parser<String, Token> =
-    mapNullable({ it.toDoubleOrNull()?.let { Token.NumberToken(it) } }, takeWhile { it.isDigit() })
+val digits = mapNullable({
+    if (it == "") {
+        null
+    } else {
+        it
+    }
+}, takeWhile { it.isDigit() })
+val digitsWithOptionalSign = map2(
+    { sign, digs -> (sign?.toString().orEmpty()) + digs },
+    optional(satisfyChar { it == '+' || it == '-' }),
+    digits
+)
+
+val exponentPart = map2(
+    { e, digs -> e + digs },
+    satisfyChar { it.equals('e', true) },
+    digitsWithOptionalSign
+)
+
+val dotPart = map2({ d, digs -> d + digs }, satisfyChar { it == '.' }, digits)
+
+val specifier = satisfyChar { it == 'f' || it == 'L' }
+
+val anyNumber: Parser<String, Token> = map4({ digs, dot, expo, spec ->
+    val combined = digs + dot.orEmpty() + expo.orEmpty()
+    if (spec == 'f') {
+        Token.FloatToken(combined.toFloat())
+    } else if (spec == 'L') {
+        Token.LongToken(combined.toLong())
+    } else if (dot == null) {
+        Token.IntToken(combined.toInt())
+    } else {
+        Token.DoubleToken(combined.toDouble())
+    }
+}, digitsWithOptionalSign, optional(dotPart), optional(exponentPart), optional(specifier))
 
 val dotsAndParens = listOf(".", ",", ";", "(", ")", "[", "]", "{", "}")
 val operators = listOf("==", "<=", ">=", "!=", "&&", "||", "!", "^", "?", ":", "+", "-", "*", "/", "%", "<", ">", "=")
@@ -51,7 +87,7 @@ fun identifierOrFixedToken(s: String): Token {
     }
 }
 
-val lexeme = choice(listOf(comment, whitespace, stringToken, numberToken, fixed, identifierOrFixed))
+val lexeme = choice(listOf(comment, whitespace, stringToken, anyNumber, fixed, identifierOrFixed))
 
 fun lex(string: String): List<Token>? {
     return parseStringTilEnd(many(lexeme), string)?.filter { isSignificant(it) }

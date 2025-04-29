@@ -1,7 +1,5 @@
 sealed class Expression {
-    data class StringLiteral(val string: String) : Expression()
-    data class NumberLiteral(val number: Double) : Expression()
-    data class BooleanLiteral(val bool: Boolean) : Expression()
+    data class Lit(val literal: Literal) : Expression()
     data class Call(val function: Expression, val arguments: List<Expression>) : Expression()
     data class Variable(val name: Name) : Expression()
     data class Dot(val expression: Expression, val name: Name) : Expression()
@@ -14,21 +12,41 @@ sealed class Expression {
     data class Function(val name: Name, val parameters: List<Name>, val body: List<Expression>) : Expression()
 }
 
+sealed class Literal {
+    data class StringLiteral(val string: String) : Literal()
+    data class DoubleLiteral(val number: Double) : Literal()
+    data class IntLiteral(val number: Int) : Literal()
+    data class FloatLiteral(val number: Float) : Literal()
+    data class LongLiteral(val number: Long) : Literal()
+    data class BooleanLiteral(val bool: Boolean) : Literal()
+}
+
+fun pretty(l: Literal): String {
+    return when (l) {
+        // TODO escape
+        is Literal.StringLiteral -> "\"" + l.string + "\""
+        is Literal.BooleanLiteral -> l.bool.toString()
+        is Literal.DoubleLiteral -> l.number.toString()
+        is Literal.FloatLiteral -> l.number.toString()
+        is Literal.IntLiteral -> l.number.toString()
+        is Literal.LongLiteral -> l.number.toString()
+    }
+}
+
 fun pretty(e: Expression): String {
     return when (e) {
-        is Expression.BooleanLiteral -> TODO()
         is Expression.Call -> pretty(e.function) + "(" + e.arguments.joinToString { pretty(it) } + ")"
         is Expression.Dot -> pretty(e.expression) + "." + e.name.identifier
         is Expression.Function ->
             ("fn " + e.name.identifier + "(" + e.parameters.joinToString { it.identifier } + ") {\n"
                     + e.body.joinToString("\n", transform = { "\t" + pretty(it) }) + "\n}")
 
-        is Expression.If -> TODO()
+        // TODO
+        is Expression.If -> "if (" + pretty(e.condition) + ") {\n"
         is Expression.Import -> "import " + e.path.joinToString(".")
         is Expression.Let -> "let " + e.name.identifier + " = " + pretty(e.expression)
-        is Expression.NumberLiteral -> TODO()
+        is Expression.Lit -> pretty(e.literal)
         is Expression.Return -> "return " + e.expression?.let { pretty(it) }
-        is Expression.StringLiteral -> "\"" + e.string + "\""
         is Expression.Variable -> e.name.identifier
     }
 }
@@ -59,14 +77,17 @@ fun token(s: String): Parser<Collection<Token>, String> {
 
 val stringLiteral: Parser<Collection<Token>, Expression> = filterToken {
     when (it) {
-        is Token.StringToken -> Expression.StringLiteral(it.string)
+        is Token.StringToken -> Expression.Lit(Literal.StringLiteral(it.string))
         else -> null
     }
 }
 
 val numberLiteral: Parser<Collection<Token>, Expression> = filterToken {
     when (it) {
-        is Token.NumberToken -> Expression.NumberLiteral(it.number)
+        is Token.IntToken -> Expression.Lit(Literal.IntLiteral(it.number))
+        is Token.LongToken -> Expression.Lit(Literal.LongLiteral(it.number))
+        is Token.FloatToken -> Expression.Lit(Literal.FloatLiteral(it.number))
+        is Token.DoubleToken -> Expression.Lit(Literal.DoubleLiteral(it.number))
         else -> null
     }
 }
@@ -84,8 +105,8 @@ val variable: Parser<Collection<Token>, Expression> = map({ Expression.Variable(
 
 val booleanLiteral: Parser<Collection<Token>, Expression> =
     or(
-        replace(Expression.BooleanLiteral(true), token("true")),
-        replace(Expression.BooleanLiteral(false), token("false"))
+        replace(Expression.Lit(Literal.BooleanLiteral(true)), token("true")),
+        replace(Expression.Lit(Literal.BooleanLiteral(false)), token("false"))
     )
 
 fun <T> parens(p: Parser<Collection<Token>, T>): Parser<Collection<Token>, T> {
@@ -96,8 +117,8 @@ fun <T> braces(p: Parser<Collection<Token>, T>): Parser<Collection<Token>, T> {
     return map3({ _, r, _ -> r }, token("{"), p, token("}"))
 }
 
-// TODO operators
-val expr = defer { composedExpression }
+// val expr = defer { composedExpression }
+val expr: Parser<Collection<Token>, Expression> = defer { orExpression }
 
 val callFn: Parser<Collection<Token>, (Expression) -> Expression> =
     map({ arguments: List<Expression> -> { e: Expression -> Expression.Call(e, arguments) } }, parens(many(expr)))
@@ -110,6 +131,84 @@ val primaryExpression: Parser<Collection<Token>, Expression> =
 
 val composedExpression =
     map2({ e, fns -> fns.fold(e, { acc, r -> r(acc) }) }, primaryExpression, many(or(dotFn, callFn)))
+
+fun makeOperator(operator: String, left: Expression, right: Expression): Expression {
+    val name = operatorToFunction(operator)
+    return Expression.Call(Expression.Dot(left, Name(name, any)), listOf(right))
+
+    // TODO push this rewrite into resolve, so that int comparisons do not get rewritten
+    // for example a < b should stay as lesser and not become a.compareTo(b) < 0
+}
+
+fun operatorToFunction(operator: String): String {
+    return when (operator) {
+        "+" -> "plus"
+        "-" -> "minus"
+        "*" -> "times"
+        "/" -> "div"
+        "%" -> "rem"
+        "==" -> "equals"
+        "!=" -> "notEquals"
+        ">=" -> "greaterOrEqual"
+        "<=" -> "lesserOrEqual"
+        "<" -> "lesser"
+        ">" -> "greater"
+        "&&" -> "and"
+        "||" -> "or"
+        else -> error("Unknown operator " + operator)
+    }
+}
+
+fun makeUnary(operator: String, expression: Expression): Expression {
+    return Expression.Call(Expression.Dot(expression, Name(operator, any)), listOf())
+}
+
+// TODO High to lower
+// composedExpression
+// unary ! - Right to left
+// * / %
+// + -
+// < <= > >=
+// == !=
+// &&
+// ||
+// ?: Right to left
+
+fun <S, T, U> leftAssoc(op: Parser<S, T>, p: Parser<S, U>, f: (T, U, U) -> U): Parser<S, U> {
+    return map2(
+        { start, pairs -> pairs.fold(start, { acc, (left, right) -> f(left, acc, right) }) },
+        p,
+        many(map2({ a, b -> Pair(a, b) }, op, p))
+    )
+}
+
+val unaryExpression: Parser<Collection<Token>, Expression> =
+    defer { choice(listOf(unaryMinusExpression, unaryPlusExpression, notExpression, composedExpression)) }
+
+val unaryMinusExpression = map({ makeUnary("unaryMinus", it) }, second(token("-"), unaryExpression))
+
+val unaryPlusExpression = map({ makeUnary("unaryPlus", it) }, second(token("-"), unaryExpression))
+
+val notExpression = map({ makeUnary("not", it) }, second(token("!"), unaryExpression))
+
+val mulExpression =
+    leftAssoc(choice(listOf(token("*"), token("/"), token("%"))), unaryExpression, ::makeOperator)
+
+val plusExpression =
+    leftAssoc(choice(listOf(token("+"), token("-"))), mulExpression, ::makeOperator)
+
+val compareExpression =
+    leftAssoc(choice(listOf(token("<="), token("<"), token(">"), token(">="))), plusExpression, ::makeOperator)
+
+val equalsExpression =
+    leftAssoc(choice(listOf(token("=="), token("!="))), compareExpression, ::makeOperator)
+
+val andExpression =
+    leftAssoc(token("&&"), equalsExpression, ::makeOperator)
+
+val orExpression =
+    leftAssoc(token("||"), andExpression, ::makeOperator)
+
 
 val call: Parser<Collection<Token>, Expression> = mapNullable({
     when (it) {
@@ -131,9 +230,11 @@ val ret: Parser<Collection<Token>, Expression> = map(
 // The block could be adapted to allow return only at the end
 val block = defer { braces(many(bodyExpression)) }
 
+val elsePart = defer { second(token("else"), or(block, map({ listOf(it) }, ifExpression))) }
+
 val ifExpression: Parser<Collection<Token>, Expression> = map3(
     { condition, th, el -> Expression.If(condition, th, el) },
-    second(token("if"), parens(expr)), block, second(token("else"), block)
+    second(token("if"), parens(expr)), block, elsePart
 )
 
 val bodyExpression = choice(listOf(let, call, ret, ifExpression))

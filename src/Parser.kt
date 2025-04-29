@@ -62,7 +62,7 @@ fun <S, T, U> sepByTrailing(p: Parser<S, T>, sep: Parser<S, U>): Parser<S, List<
 fun <S, T, U> mapNullable(f: (T) -> U?, p: Parser<S, T>): Parser<S, U> {
     return Parser {
         p.run(it)?.let { (rest, obj) ->
-            f(obj)?.let { Pair(rest, it) }
+            f(obj)?.let { result -> Pair(rest, result) }
         }
     }
 }
@@ -121,6 +121,26 @@ fun <S, T, U, V, W> map3(f: (T, U, V) -> W, p1: Parser<S, T>, p2: Parser<S, U>, 
             p2.run(rest1)?.let { (rest2, result2) ->
                 p3.run(rest2)?.let { (rest3, result3) ->
                     Pair(rest3, f(result1, result2, result3))
+                }
+            }
+        }
+    }
+}
+
+fun <S, T, U, V, W, X> map4(
+    f: (T, U, V, W) -> X,
+    p1: Parser<S, T>,
+    p2: Parser<S, U>,
+    p3: Parser<S, V>,
+    p4: Parser<S, W>
+): Parser<S, X> {
+    return Parser {
+        p1.run(it)?.let { (rest1, result1) ->
+            p2.run(rest1)?.let { (rest2, result2) ->
+                p3.run(rest2)?.let { (rest3, result3) ->
+                    p4.run(rest3)?.let { (rest4, result4) ->
+                        Pair(rest4, f(result1, result2, result3, result4))
+                    }
                 }
             }
         }

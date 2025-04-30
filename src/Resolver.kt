@@ -30,7 +30,7 @@ fun resolveFile(expressions: List<Expression>): List<Expression> {
                 resolved
             }
 
-            else -> TODO()
+            else -> error("Non top level expression " + expression + " at top level")
         }
     }
 }
@@ -82,9 +82,7 @@ fun resolveCall(call: Expression.Call, environment: Environment): Expression.Cal
 
     return when (call.function) {
         is Expression.Dot -> resolveDotCall(call.function, environment, resolvedArguments)
-        // TODO add a variant of resolveVariable that takes argumentTypes as parameter
-        // to find the correct overload
-        is Expression.Variable -> Expression.Call(resolveVariable(call.function, environment), resolvedArguments)
+        is Expression.Variable -> resolveVariableCall(call.function, environment, resolvedArguments)
         else -> error("Non call " + call.function + " in call")
     }
 }
@@ -95,7 +93,7 @@ fun readType(expression: Expression): Type {
         is Expression.Call -> (readType(expression.function) as Type.Arrow).returnType
         is Expression.Dot -> expression.name.type
         is Expression.Variable -> expression.name.type
-        else -> TODO()
+        else -> error("Cannot read type of expression " + expression)
     }
 }
 
@@ -108,6 +106,24 @@ fun readType(literal: Literal): Type {
         is Literal.FloatLiteral -> Type.Concrete("float")
         is Literal.LongLiteral -> Type.Concrete("long")
     }
+}
+
+fun resolveVariableCall(
+    variable: Expression.Variable,
+    environment: Environment,
+    resolvedArguments: List<Expression>
+): Expression.Call {
+    // TODO find overloads with resolved argument types
+    val resolvedVariable = resolveVariable(variable, environment)
+    val functionType = readType(resolvedVariable)
+    val argumentTypes = resolvedArguments.map { readType(it) }
+    if (functionType is Type.Arrow) {
+        if (argumentTypes.count() != functionType.parameterTypes.count()) {
+            error("Parameters did not match " + argumentTypes + " " + functionType.parameterTypes)
+        }
+    }
+
+    return Expression.Call(resolvedVariable, resolvedArguments)
 }
 
 fun resolveDotCall(
@@ -171,28 +187,19 @@ fun resolveDot(dot: Expression.Dot, environment: Environment): Expression {
     return Expression.Dot(resolvedExpression, newName)
 }
 
-// TODO read pseudo class file for primitive types
-// Something like 1+2 becomes 1.plus(2)
-// plus is then annotated
-
-// TODO equals is a little bit special, because for example "Hi" == "there" will turn into
-// "Hi".equals("there") and then we can't find an overload, because the argument is string and not object
-// Solutions would be
-// * auto conversion "Hi".equals(toObject("there"))
-// * special case for equals, we might need this anyway for primitive types
-// * some form of subtyping. If we can't find a function with a string argument, turn it into object and search again
-//   this could explode quickly, but we might only need to do it for strings
 fun getMethodType(type: Type, accessor: String, argumentTypes: List<Type>): Type {
+    // TODO read pseudo class file for primitive types
+    //  instead of specifing all those primitive calls in code
     if (isPrimitive(type)) {
-        when (accessor) {
-            "plus", "minus" -> return Type.Arrow(type, listOf(type))
-            "equals" -> return Type.Arrow(Type.Concrete("bool"), listOf(type))
-            "not" -> return Type.Arrow(Type.Concrete("bool"), listOf())
-            "compareTo" -> return Type.Arrow(Type.Concrete("int"), listOf(type))
-            "lesserOrEqual" -> return Type.Arrow(Type.Concrete("int"), listOf(type))
-            "lesser" -> return Type.Arrow(Type.Concrete("int"), listOf(type))
-            "greaterOrEqual" -> return Type.Arrow(Type.Concrete("int"), listOf(type))
-            "greater" -> return Type.Arrow(Type.Concrete("int"), listOf(type))
+        return when (accessor) {
+            "plus", "minus" -> Type.Arrow(type, listOf(type))
+            "equals" -> Type.Arrow(Type.Concrete("bool"), listOf(type))
+            "not" -> Type.Arrow(Type.Concrete("bool"), listOf())
+            "compareTo" -> Type.Arrow(Type.Concrete("int"), listOf(type))
+            "lesserOrEqual" -> Type.Arrow(Type.Concrete("int"), listOf(type))
+            "lesser" -> Type.Arrow(Type.Concrete("int"), listOf(type))
+            "greaterOrEqual" -> Type.Arrow(Type.Concrete("int"), listOf(type))
+            "greater" -> Type.Arrow(Type.Concrete("int"), listOf(type))
             else -> error("Can't find method type for primitive " + type + " " + accessor)
         }
     }
@@ -202,6 +209,14 @@ fun getMethodType(type: Type, accessor: String, argumentTypes: List<Type>): Type
     val options = classFile.methods().filter { it.methodName().stringValue() == accessor }
     val overloads = options.map { convertMethodType(it.methodType().stringValue()) }
 
+    // TODO improve handling of equals
+    //  equals is a little bit special, because for example "Hi" == "there" will turn into
+    // "Hi".equals("there") and then we can't find an overload, because the argument is string and not object
+    // Solutions would be
+    // * auto conversion "Hi".equals(toObject("there"))
+    // * special case for equals, we might need this anyway for primitive types
+    // * some form of subtyping. If we can't find a function with a string argument,
+    //      turn it into object and search again. However, this could explode quickly
     if (accessor == "equals") {
         return overloads.first()
     }
@@ -313,4 +328,11 @@ fun resolveFunction(function: Expression.Function, environment: Environment): Ex
 
     val resolvedName = Name(function.name.identifier, functionType)
     return Expression.Function(resolvedName, parameters, resolvedBody)
+}
+
+fun exploreClass(path: String) {
+    val classFile = getClassFile(path)
+    val methodTypes = classFile.methods().map { it.methodName().stringValue() + " " + convertMethodType(it.methodType().stringValue()) }
+    val fieldTypes = classFile.fields().map { it.fieldName().stringValue() + " " + convertFieldType(it.fieldType().stringValue()) }
+    (methodTypes + fieldTypes).forEach { println(it) }
 }

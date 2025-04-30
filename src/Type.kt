@@ -16,14 +16,14 @@ fun makeConcrete(path: String): Type.Concrete {
 val parseI = map({ Type.Concrete("int") }, takeString("I"))
 val parseJ = map({ Type.Concrete("long") }, takeString("J"))
 val parseV = map({ Type.Concrete("void") }, takeString("V"))
-val parseZ = map({ Type.Concrete("boolean") }, takeString("Z"))
+val parseZ = map({ Type.Concrete("bool") }, takeString("Z"))
 val parseB = map({ Type.Concrete("byte") }, takeString("B"))
 val parseC = map({ Type.Concrete("char") }, takeString("C"))
 val parseF = map({ Type.Concrete("float") }, takeString("F"))
 val parseD = map({ Type.Concrete("double") }, takeString("D"))
 val parseL = map3(
     { _, path, _ -> makeConcrete(path) },
-    takeString("L"), takeWhile { it.isLetterOrDigit() || it == '/' }, takeString(";")
+    takeString("L"), takeWhile { it.isLetterOrDigit() || it == '/' || it == '$' }, takeString(";")
 )
 
 val parseT = choice(listOf(parseI, parseJ, parseV, parseZ, parseB, parseC, parseF, parseD, parseL))
@@ -37,9 +37,9 @@ val parseM = map2(
 
 
 fun convertFieldType(stringValue: String): Type {
-    return parseStringTilEnd(parseK, stringValue) ?: throw Exception("Cannot parse field type " + stringValue)
+    return parseStringTilEnd(parseK, stringValue) ?: error("Cannot parse field type " + stringValue)
 }
 
 fun convertMethodType(stringValue: String): Type.Arrow {
-    return parseStringTilEnd(parseM, stringValue) ?: throw Exception("Cannot parse method type " + stringValue)
+    return parseStringTilEnd(parseM, stringValue) ?: error("Cannot parse method type " + stringValue)
 }

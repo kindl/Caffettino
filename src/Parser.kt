@@ -8,10 +8,11 @@ fun <S, T, E> parseTilEnd(p: Parser<S, T>, input: S): T? where S : Iterable<E> {
     } else {
         val (rest, output) = result
         val first = rest.firstOrNull()
+        val second = rest.elementAtOrNull(1)
         if (first == null) {
             return output
         } else {
-            println("Could not parse til end. Next token is $first")
+            println("Could not parse til end. Next token is $first $second")
             return null
         }
     }

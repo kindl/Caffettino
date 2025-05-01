@@ -116,6 +116,7 @@ fun endsWithReturn(expressions: List<Expression>): Boolean {
     }
 }
 
+// TODO avoid adding locals several times
 fun gatherLocals(expressions: List<Expression>): List<Name> {
     val locals = expressions.flatMap { expression ->
         when (expression) {
@@ -161,8 +162,6 @@ fun generateReturn(context: Context, expression: Expression.Return) {
     }
 }
 
-// TODO probably has to return the context so that we can keep track of changes
-// TODO avoid adding locals several times
 fun generateIf(startContext: Context, ifExpression: Expression.If) {
     generateExpression(startContext, ifExpression.condition)
     if (ifExpression.elseBranch != null) {
@@ -202,7 +201,10 @@ fun generateCall(context: Context, call: Expression.Call) {
 
 fun generateVariableCall(context: Context, variable: Expression.Variable, arguments: List<Expression>) {
     val methodTypeDescriptor = getMethodTypeDescriptor(variable.name)
-    // TODO when importing functions, a variable could also come from a different class
+
+    // TODO allow calling imported functions
+    // Here we basically assume, that calling a function always has the current class as owner
+    // However, when importing, a different class will be the owner
     val ownerTypeDescriptor = context.classDescriptor
 
     for (expression in arguments) {

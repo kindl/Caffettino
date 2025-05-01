@@ -8,6 +8,9 @@ sealed class Token {
     data class FixedToken(val string: String) : Token()
     data class WhitespaceToken(val string: String) : Token()
     data class CommentToken(val string: String) : Token()
+    data class TemplateStringBeginToken(val string: String) : Token()
+    data class TemplateStringPartToken(val string: String) : Token()
+    data class TemplateStringEndToken(val string: String) : Token()
 }
 
 
@@ -15,13 +18,35 @@ fun isSignificant(t: Token): Boolean {
     return !(t is Token.WhitespaceToken || t is Token.CommentToken)
 }
 
-// TODO escape sequences
+// TODO escape sequences like \n
 val stringToken: Parser<String, Token> =
     map3(
         { _, s, _ -> Token.StringToken(s) },
         satisfyChar { it == '\"' },
         takeWhile { it != '\"' },
         satisfyChar { it == '\"' })
+
+val expressionPart =
+    second(satisfyChar { it == '{' }, manyWithEnd(defer { lexeme }, satisfyChar { it == '}' }))
+
+val templateStringBegin =
+    map2({ _, _ -> Token.TemplateStringBeginToken("") }, satisfyChar { it == '$' }, satisfyChar { it == '\"' })
+
+val templateStringEnd =
+    replace(Token.TemplateStringEndToken(""), satisfyChar { it == '\"' })
+
+val templateStringPart: Parser<String, Token> =
+    map({ Token.TemplateStringPartToken(it) }, takeWhile { it != '\"' && it != '{' })
+
+val templateString: Parser<String, List<Token>> =
+    map4(
+        { b, s, m, e -> listOf(b, s) + m.flatten() + listOf(e) },
+        templateStringBegin,
+        templateStringPart,
+        many(map2({ e, s -> e + listOf(s) }, expressionPart, templateStringPart)),
+        templateStringEnd
+    )
+
 
 val digits = mapNullable({
     if (it == "") {
@@ -30,6 +55,7 @@ val digits = mapNullable({
         it
     }
 }, takeWhile { it.isDigit() })
+
 val digitsWithOptionalSign = map2(
     { sign, digs -> (sign?.toString().orEmpty()) + digs },
     optional(satisfyChar { it == '+' || it == '-' }),
@@ -89,6 +115,8 @@ fun identifierOrFixedToken(s: String): Token {
 
 val lexeme = choice(listOf(comment, whitespace, stringToken, anyNumber, fixed, identifierOrFixed))
 
+val lexemes = map({ it.flatten() }, many(or(map({ listOf(it) }, lexeme), templateString)))
+
 fun lex(string: String): List<Token>? {
-    return parseStringTilEnd(many(lexeme), string)?.filter { isSignificant(it) }
+    return parseStringTilEnd(lexemes, string)?.filter { isSignificant(it) }
 }

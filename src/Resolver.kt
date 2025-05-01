@@ -134,11 +134,14 @@ fun resolveDotCall(
     val resolvedExpression = resolveExpression(dot.expression, environment)
     val leftType = readType(resolvedExpression)
 
+    // Special cases for operators
     if (!isPrimitive(leftType) && resolvedArguments.count() == 1) {
         if (isComparison(dot.name.identifier)) {
             return makeComparison(dot.name.identifier, resolvedExpression, resolvedArguments.first())
         } else if (dot.name.identifier == "notEquals") {
             return makeNotEquals(resolvedExpression, resolvedArguments.first())
+        } else if (dot.name.identifier == "plus" && leftType == Type.Concrete("java/lang/String")) {
+            return makeConcat(resolvedExpression, resolvedArguments.first())
         }
     }
 
@@ -167,6 +170,11 @@ fun makeNotEquals(left: Expression, right: Expression): Expression.Call {
     return Expression.Call(Expression.Dot(equalsPart, Name("not", notType)), listOf())
 }
 
+fun makeConcat(left: Expression, right: Expression): Expression.Call {
+    val concatType = Type.Arrow(Type.Concrete("java/lang/String"), listOf(Type.Concrete("java/lang/String")))
+    return Expression.Call(Expression.Dot(left, Name("concat", concatType)), listOf(right))
+}
+
 fun isPrimitive(type: Type): Boolean {
     return listOf(
         Type.Concrete("int"), Type.Concrete("long"),
@@ -189,7 +197,7 @@ fun resolveDot(dot: Expression.Dot, environment: Environment): Expression {
 
 fun getMethodType(type: Type, accessor: String, argumentTypes: List<Type>): Type {
     // TODO read pseudo class file for primitive types
-    //  instead of specifing all those primitive calls in code
+    // instead of specifying all those primitive calls in code
     if (isPrimitive(type)) {
         return when (accessor) {
             "plus", "minus" -> Type.Arrow(type, listOf(type))
@@ -210,7 +218,7 @@ fun getMethodType(type: Type, accessor: String, argumentTypes: List<Type>): Type
     val overloads = options.map { convertMethodType(it.methodType().stringValue()) }
 
     // TODO improve handling of equals
-    //  equals is a little bit special, because for example "Hi" == "there" will turn into
+    // equals is a little bit special, because for example "Hi" == "there" will turn into
     // "Hi".equals("there") and then we can't find an overload, because the argument is string and not object
     // Solutions would be
     // * auto conversion "Hi".equals(toObject("there"))
@@ -322,17 +330,14 @@ fun resolveFunction(function: Expression.Function, environment: Environment): Ex
     val functionType = Type.Arrow(returnType, parameters.map { it.type })
 
     // TODO infer parameter types
-    // we could go through the expression in a first step and add all obvious annotations
-    // like let x = "hello" then x is string
-    // and a new unification variable for everything unspecified
-
     val resolvedName = Name(function.name.identifier, functionType)
     return Expression.Function(resolvedName, parameters, resolvedBody)
 }
 
 fun exploreClass(path: String) {
     val classFile = getClassFile(path)
-    val methodTypes = classFile.methods().map { it.methodName().stringValue() + " " + convertMethodType(it.methodType().stringValue()) }
+    // val methodTypes = classFile.methods().map { it.methodName().stringValue() + " " + convertMethodType(it.methodType().stringValue()) }
+    val methodTypes = classFile.methods().map { it.methodName().stringValue() + " " + convertMethodType(it.methodType().stringValue()) + " " + it }
     val fieldTypes = classFile.fields().map { it.fieldName().stringValue() + " " + convertFieldType(it.fieldType().stringValue()) }
     (methodTypes + fieldTypes).forEach { println(it) }
 }

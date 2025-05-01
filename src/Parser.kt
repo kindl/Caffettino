@@ -8,11 +8,11 @@ fun <S, T, E> parseTilEnd(p: Parser<S, T>, input: S): T? where S : Iterable<E> {
     } else {
         val (rest, output) = result
         val first = rest.firstOrNull()
-        val second = rest.elementAtOrNull(1)
+        val initials = rest.take(10)
         if (first == null) {
             return output
         } else {
-            println("Could not parse til end. Next token is $first $second")
+            println("Could not parse til end. Next tokens are $initials")
             return null
         }
     }
@@ -186,4 +186,8 @@ fun takeString(s: String): Parser<String, String> {
             null
         }
     }
+}
+
+fun <S, T, U> manyWithEnd(p: Parser<S, T>, end: Parser<S, U>): Parser<S, List<T>> {
+    return or(replace(listOf(), end), map2({ res, rest -> listOf(res) + rest }, p, defer { manyWithEnd(p, end) }))
 }

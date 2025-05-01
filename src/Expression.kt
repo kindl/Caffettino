@@ -27,9 +27,9 @@ fun pretty(l: Literal): String {
         is Literal.StringLiteral -> "\"" + l.string + "\""
         is Literal.BooleanLiteral -> l.bool.toString()
         is Literal.DoubleLiteral -> l.number.toString()
-        is Literal.FloatLiteral -> l.number.toString()
+        is Literal.FloatLiteral -> l.number.toString() + "f"
         is Literal.IntLiteral -> l.number.toString()
-        is Literal.LongLiteral -> l.number.toString()
+        is Literal.LongLiteral -> l.number.toString() + "L"
     }
 }
 
@@ -41,8 +41,13 @@ fun pretty(e: Expression): String {
             ("fn " + e.name.identifier + "(" + e.parameters.joinToString { it.identifier } + ") {\n"
                     + e.body.joinToString("\n", transform = { "\t" + pretty(it) }) + "\n}")
 
-        // TODO
-        is Expression.If -> "if (" + pretty(e.condition) + ") {\n"
+        is Expression.If ->
+            "if (" + pretty(e.condition) + ") {\n" + (e.thenBranch.joinToString(
+                "\n",
+                transform = { "\t" + pretty(it) })) + "\n} else {\n" + (e.elseBranch?.joinToString(
+                "\n",
+                transform = { "\t" + pretty(it) })) + "\n}"
+
         is Expression.Import -> "import " + e.path.joinToString(".")
         is Expression.Let -> "let " + e.name.identifier + " = " + pretty(e.expression)
         is Expression.Lit -> pretty(e.literal)
@@ -126,18 +131,35 @@ val callFn: Parser<Collection<Token>, (Expression) -> Expression> =
 val dotFn: Parser<Collection<Token>, (Expression) -> Expression> =
     map({ name -> { e: Expression -> Expression.Dot(e, name) } }, second(token("."), name))
 
+val templateStringLiteralPart: Parser<Collection<Token>, Expression> = filterToken {
+    when (it) {
+        is Token.TemplateStringPartToken -> Expression.Lit(Literal.StringLiteral(it.string))
+        else -> null
+    }
+}
+
+// Wraps expression inside a template string with a toString call
+val expressionWithToString: Parser<Collection<Token>, Expression> =
+    map({ Expression.Call(Expression.Dot(it, Name("toString", any)), listOf()) }, expr)
+
+val templateStringLiteral: Parser<Collection<Token>, Expression> =
+    map3(
+        { _, parts, _ -> parts.reduce { a, b -> makeConcat(a, b) } },
+        satisfy { it is Token.TemplateStringBeginToken },
+        many(or(templateStringLiteralPart, expressionWithToString)),
+        satisfy { it is Token.TemplateStringEndToken })
+
+val literal = choice(listOf(templateStringLiteral, booleanLiteral, stringLiteral, numberLiteral))
+
 val primaryExpression: Parser<Collection<Token>, Expression> =
-    choice(listOf(booleanLiteral, stringLiteral, numberLiteral, variable, parens(expr)))
+    choice(listOf(literal, variable, parens(expr)))
 
 val composedExpression =
     map2({ e, fns -> fns.fold(e, { acc, r -> r(acc) }) }, primaryExpression, many(or(dotFn, callFn)))
 
 fun makeOperator(operator: String, left: Expression, right: Expression): Expression {
-    val name = operatorToFunction(operator)
-    return Expression.Call(Expression.Dot(left, Name(name, any)), listOf(right))
-
-    // TODO push this rewrite into resolve, so that int comparisons do not get rewritten
-    // for example a < b should stay as lesser and not become a.compareTo(b) < 0
+    val function = operatorToFunction(operator)
+    return Expression.Call(Expression.Dot(left, Name(function, any)), listOf(right))
 }
 
 fun operatorToFunction(operator: String): String {
@@ -159,13 +181,22 @@ fun operatorToFunction(operator: String): String {
     }
 }
 
-fun makeUnary(operator: String, expression: Expression): Expression {
-    return Expression.Call(Expression.Dot(expression, Name(operator, any)), listOf())
+fun unaryOperatorToFunction(operator: String): String {
+    return when (operator) {
+        "+" -> "unaryPlus"
+        "-" -> "unaryMinus"
+        "!" -> "not"
+        else -> error("Unknown operator " + operator)
+    }
 }
 
-// TODO High to lower
-// composedExpression
-// unary ! - Right to left
+fun makeUnary(operator: String, expression: Expression): Expression {
+    val function = unaryOperatorToFunction(operator)
+    return Expression.Call(Expression.Dot(expression, Name(function, any)), listOf())
+}
+
+// TODO Test precedences
+// unary ! - +
 // * / %
 // + -
 // < <= > >=
@@ -174,7 +205,7 @@ fun makeUnary(operator: String, expression: Expression): Expression {
 // ||
 // ?: Right to left
 
-fun <S, T, U> leftAssoc(op: Parser<S, T>, p: Parser<S, U>, f: (T, U, U) -> U): Parser<S, U> {
+fun <S, T, U> leftAssoc(f: (T, U, U) -> U, p: Parser<S, U>, op: Parser<S, T>): Parser<S, U> {
     return map2(
         { start, pairs -> pairs.fold(start, { acc, (left, right) -> f(left, acc, right) }) },
         p,
@@ -185,29 +216,29 @@ fun <S, T, U> leftAssoc(op: Parser<S, T>, p: Parser<S, U>, f: (T, U, U) -> U): P
 val unaryExpression: Parser<Collection<Token>, Expression> =
     defer { choice(listOf(unaryMinusExpression, unaryPlusExpression, notExpression, composedExpression)) }
 
-val unaryMinusExpression = map({ makeUnary("unaryMinus", it) }, second(token("-"), unaryExpression))
+val unaryMinusExpression = map2(::makeUnary, token("-"), unaryExpression)
 
-val unaryPlusExpression = map({ makeUnary("unaryPlus", it) }, second(token("-"), unaryExpression))
+val unaryPlusExpression = map2(::makeUnary, token("+"), unaryExpression)
 
-val notExpression = map({ makeUnary("not", it) }, second(token("!"), unaryExpression))
+val notExpression = map2(::makeUnary, token("!"), unaryExpression)
 
 val mulExpression =
-    leftAssoc(choice(listOf(token("*"), token("/"), token("%"))), unaryExpression, ::makeOperator)
+    leftAssoc(::makeOperator, unaryExpression, choice(listOf(token("*"), token("/"), token("%"))))
 
 val plusExpression =
-    leftAssoc(choice(listOf(token("+"), token("-"))), mulExpression, ::makeOperator)
+    leftAssoc(::makeOperator, mulExpression, choice(listOf(token("+"), token("-"))))
 
 val compareExpression =
-    leftAssoc(choice(listOf(token("<="), token("<"), token(">"), token(">="))), plusExpression, ::makeOperator)
+    leftAssoc(::makeOperator, plusExpression, choice(listOf(token("<="), token("<"), token(">"), token(">="))))
 
 val equalsExpression =
-    leftAssoc(choice(listOf(token("=="), token("!="))), compareExpression, ::makeOperator)
+    leftAssoc(::makeOperator, compareExpression, choice(listOf(token("=="), token("!="))))
 
 val andExpression =
-    leftAssoc(token("&&"), equalsExpression, ::makeOperator)
+    leftAssoc(::makeOperator, equalsExpression, token("&&"))
 
 val orExpression =
-    leftAssoc(token("||"), andExpression, ::makeOperator)
+    leftAssoc(::makeOperator, andExpression, token("||"))
 
 
 val call: Parser<Collection<Token>, Expression> = mapNullable({

@@ -4,12 +4,13 @@ sealed class Type {
 }
 
 val any = Type.Concrete("Any")
+val stringType = Type.Concrete("string")
 
 fun makeConcrete(path: String): Type.Concrete {
-    return if (path == "java/lang/Object") {
-        any
-    } else {
-        Type.Concrete(path)
+    return when (path) {
+        "java/lang/Object" -> any
+        "java/lang/String" -> stringType
+        else -> Type.Concrete(path)
     }
 }
 
@@ -37,9 +38,9 @@ val parseM = map2(
 
 
 fun convertFieldType(stringValue: String): Type {
-    return parseStringTilEnd(parseK, stringValue) ?: error("Cannot parse field type " + stringValue)
+    return parseStringCompletely(parseK, stringValue) ?: error("Cannot parse field type " + stringValue)
 }
 
 fun convertMethodType(stringValue: String): Type.Arrow {
-    return parseStringTilEnd(parseM, stringValue) ?: error("Cannot parse method type " + stringValue)
+    return parseStringCompletely(parseM, stringValue) ?: error("Cannot parse method type " + stringValue)
 }

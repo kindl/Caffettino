@@ -1,8 +1,6 @@
-import java.lang.constant.ConstantDescs
 import java.lang.classfile.*
-import java.lang.constant.ClassDesc
-import java.lang.constant.ConstantDesc
-import java.lang.constant.MethodTypeDesc
+import java.lang.constant.*
+import java.lang.reflect.AccessFlag
 import java.nio.file.Files
 import java.nio.file.Paths
 
@@ -229,8 +227,15 @@ fun generateDotCall(context: Context, dot: Expression.Dot, arguments: List<Expre
         generateExpression(context, expression)
     }
 
-    // TODO invokeinterface
-
+    // TODO invokedynamic
+    // research how to build DynamicCallSiteDesc
+    // calls like list.forEach({ println(it) })
+    // are translated into a static method
+    // fn someLambda(it) { println(it) }
+    // and the forEach path becomes
+    // loadlocal
+    // InvokeDynamic with some function info on someLambda
+    // invokevirtual forEach
     if (ownerTypeDescriptor.descriptorString() == "I") {
         when (dot.name.identifier) {
             "equals" -> context.codeBuilder.ifThenElse(Opcode.IF_ICMPEQ, { it.iconst_1() }, { it.iconst_0() })
@@ -285,10 +290,24 @@ fun generateDotCall(context: Context, dot: Expression.Dot, arguments: List<Expre
             "not" -> context.codeBuilder.ifThenElse(Opcode.IFEQ, { it.iconst_1() }, { it.iconst_0() })
         }
     } else if (isVirtual(dot)) {
-        context.codeBuilder.invokevirtual(ownerTypeDescriptor, dot.name.identifier, methodTypeDescriptor)
+        // Often a call is virtual, but in some cases the return is an interface, requiring invokeinterface on calls
+        // for example for `List.of("hi", "there").toString()`
+        if (isInterface(ownerType)) {
+            context.codeBuilder.invokeinterface(ownerTypeDescriptor, dot.name.identifier, methodTypeDescriptor)
+        } else {
+            context.codeBuilder.invokevirtual(ownerTypeDescriptor, dot.name.identifier, methodTypeDescriptor)
+        }
     } else {
-        context.codeBuilder.invokestatic(ownerTypeDescriptor, dot.name.identifier, methodTypeDescriptor)
+        // Necessary for static interface methods like List.of()
+        val isInterface = isInterface(ownerType)
+        context.codeBuilder.invokestatic(ownerTypeDescriptor, dot.name.identifier, methodTypeDescriptor, isInterface)
     }
+}
+
+fun isInterface(type: Type): Boolean {
+    val path = (type as Type.Concrete).name
+    val classModel = getClassFile(path)
+    return classModel.flags().has(AccessFlag.INTERFACE)
 }
 
 fun generateLiteral(context: Context, literal: Literal) {
@@ -359,6 +378,7 @@ fun getClassDescriptor(type: Type): ClassDesc {
             "byte" -> ConstantDescs.CD_byte
             "char" -> ConstantDescs.CD_char
             "bool" -> ConstantDescs.CD_boolean
+            "string" -> ConstantDescs.CD_String
             "Any" -> ConstantDescs.CD_Object
             else ->
                 if (type.name.startsWith("[") && type.name.endsWith("]")) {

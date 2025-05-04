@@ -100,7 +100,7 @@ fun readType(expression: Expression): Type {
 fun readType(literal: Literal): Type {
     return when (literal) {
         is Literal.BooleanLiteral -> Type.Concrete("bool")
-        is Literal.StringLiteral -> Type.Concrete("java/lang/String")
+        is Literal.StringLiteral -> stringType
         is Literal.IntLiteral -> Type.Concrete("int")
         is Literal.DoubleLiteral -> Type.Concrete("double")
         is Literal.FloatLiteral -> Type.Concrete("float")
@@ -140,7 +140,7 @@ fun resolveDotCall(
             return makeComparison(dot.name.identifier, resolvedExpression, resolvedArguments.first())
         } else if (dot.name.identifier == "notEquals") {
             return makeNotEquals(resolvedExpression, resolvedArguments.first())
-        } else if (dot.name.identifier == "plus" && leftType == Type.Concrete("java/lang/String")) {
+        } else if (dot.name.identifier == "plus" && leftType == stringType) {
             return makeConcat(resolvedExpression, resolvedArguments.first())
         }
     }
@@ -171,7 +171,7 @@ fun makeNotEquals(left: Expression, right: Expression): Expression.Call {
 }
 
 fun makeConcat(left: Expression, right: Expression): Expression.Call {
-    val concatType = Type.Arrow(Type.Concrete("java/lang/String"), listOf(Type.Concrete("java/lang/String")))
+    val concatType = Type.Arrow(stringType, listOf(stringType))
     return Expression.Call(Expression.Dot(left, Name("concat", concatType)), listOf(right))
 }
 
@@ -214,7 +214,7 @@ fun getMethodType(type: Type, accessor: String, argumentTypes: List<Type>): Type
 
     val path = (type as Type.Concrete).name
     val classFile = getClassFile(path)
-    val options = classFile.methods().filter { it.methodName().stringValue() == accessor }
+    val options = getMethodsAndUpcastMethods(classFile).filter { it.methodName().stringValue() == accessor }
     val overloads = options.map { convertMethodType(it.methodType().stringValue()) }
 
     // TODO improve handling of equals
@@ -232,13 +232,19 @@ fun getMethodType(type: Type, accessor: String, argumentTypes: List<Type>): Type
     val methodType = overloads.firstOrNull { it.parameterTypes == argumentTypes }
 
     return methodType
-        ?: error("Cannot find fitting overload for " + accessor + " with arguments " + argumentTypes + " in " + overloads)
+        ?: error("Cannot find fitting overload for "
+                + accessor + " with arguments "
+                + argumentTypes + " in "
+                + overloads + " for owner "
+                + type)
 }
 
 fun getClassFile(path: String): ClassModel {
     // TODO find class by path, and allow non-system imports like import kotlin.io.Console
     val stream = if (path == "Any") {
         ClassLoader.getSystemResourceAsStream("java/lang/Object.class")
+    } else if (path == "string") {
+        ClassLoader.getSystemResourceAsStream("java/lang/String.class")
     } else if (path.startsWith("java/")) {
         ClassLoader.getSystemResourceAsStream(path + ".class")
     } else if (path.startsWith("kotlin/")) {
@@ -249,6 +255,17 @@ fun getClassFile(path: String): ClassModel {
 
     val classFile = ClassFile.of().parse(stream.readAllBytes())
     return classFile
+}
+
+fun getMethodsAndUpcastMethods(classModel: ClassModel): List<MethodModel> {
+    val superclass = classModel.superclass();
+    val interfaces = classModel.interfaces();
+    println("Got " + superclass + " for " + classModel.thisClass().name().stringValue() + " with interfaces " + interfaces)
+    val superclassModel = superclass.map { getClassFile(it.name().stringValue()) }
+    val interfaceModels = interfaces.map { getClassFile(it.name().stringValue()) }
+    val superclassMethods = superclassModel.map { getMethodsAndUpcastMethods(it) }.orElse(emptyList())
+    val interfaceMethods = interfaceModels.flatMap { getMethodsAndUpcastMethods(it) }
+    return classModel.methods() + superclassMethods + interfaceMethods
 }
 
 // TODO non-static field access
@@ -311,7 +328,13 @@ fun getReturnType(expressions: List<Expression>): Type? {
     return types.firstOrNull()
 }
 
+fun resolveAnnotation(expression: Expression, environment: Environment): Expression {
+    return resolveExpression(expression, environment)
+}
+
 fun resolveFunction(function: Expression.Function, environment: Environment): Expression.Function {
+    val resolvedAnnotations = function.annotations.map { resolveAnnotation(it, environment) }
+
     val parameters = if (function.name.identifier == "main") {
         println("Changing parameters for main function")
         listOf(Name("args", Type.Concrete("[java/lang/String]")))
@@ -331,12 +354,11 @@ fun resolveFunction(function: Expression.Function, environment: Environment): Ex
 
     // TODO infer parameter types
     val resolvedName = Name(function.name.identifier, functionType)
-    return Expression.Function(resolvedName, parameters, resolvedBody)
+    return Expression.Function(resolvedName, parameters, resolvedBody, resolvedAnnotations)
 }
 
 fun exploreClass(path: String) {
     val classFile = getClassFile(path)
-    // val methodTypes = classFile.methods().map { it.methodName().stringValue() + " " + convertMethodType(it.methodType().stringValue()) }
     val methodTypes = classFile.methods().map { it.methodName().stringValue() + " " + convertMethodType(it.methodType().stringValue()) + " " + it }
     val fieldTypes = classFile.fields().map { it.fieldName().stringValue() + " " + convertFieldType(it.fieldType().stringValue()) }
     (methodTypes + fieldTypes).forEach { println(it) }

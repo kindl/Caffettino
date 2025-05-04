@@ -1,24 +1,24 @@
 class Parser<Input, Output>(val run: (Input) -> Pair<Input, Output>?)
 
 
-fun <S, T, E> parseTilEnd(p: Parser<S, T>, input: S): T? where S : Iterable<E> {
+fun <S, T, E> parseCompletely(p: Parser<S, T>, input: S): T? where S : Iterable<E> {
     val result = p.run(input)
     if (result == null) {
         return null
     } else {
         val (rest, output) = result
         val first = rest.firstOrNull()
-        val initials = rest.take(10)
         if (first == null) {
             return output
         } else {
+            val initials = rest.take(10)
             println("Could not parse til end. Next tokens are $initials")
             return null
         }
     }
 }
 
-fun <T> parseStringTilEnd(p: Parser<String, T>, input: String): T? {
+fun <T> parseStringCompletely(p: Parser<String, T>, input: String): T? {
     val result = p.run(input)
     if (result == null) {
         return null
@@ -53,7 +53,7 @@ fun <S, T, U> sepBy(p: Parser<S, T>, sep: Parser<S, U>): Parser<S, List<T>> {
 }
 
 fun <S, T, U> sepBy1(p: Parser<S, T>, sep: Parser<S, U>): Parser<S, List<T>> {
-    return map2({ e, es -> listOf(e) + es }, p, many(map2({ _, r -> r }, sep, p)))
+    return map2({ e, es -> listOf(e) + es }, p, many(second(sep, p)))
 }
 
 fun <S, T, U> sepByTrailing(p: Parser<S, T>, sep: Parser<S, U>): Parser<S, List<T>> {
@@ -117,15 +117,7 @@ fun <S, T, U, V> map2(f: (T, U) -> V, p1: Parser<S, T>, p2: Parser<S, U>): Parse
 }
 
 fun <S, T, U, V, W> map3(f: (T, U, V) -> W, p1: Parser<S, T>, p2: Parser<S, U>, p3: Parser<S, V>): Parser<S, W> {
-    return Parser {
-        p1.run(it)?.let { (rest1, result1) ->
-            p2.run(rest1)?.let { (rest2, result2) ->
-                p3.run(rest2)?.let { (rest3, result3) ->
-                    Pair(rest3, f(result1, result2, result3))
-                }
-            }
-        }
-    }
+    return map2({r1, (r2, r3) -> f(r1, r2, r3)}, p1, map2(::Pair, p2, p3))
 }
 
 fun <S, T, U, V, W, X> map4(
@@ -135,17 +127,7 @@ fun <S, T, U, V, W, X> map4(
     p3: Parser<S, V>,
     p4: Parser<S, W>
 ): Parser<S, X> {
-    return Parser {
-        p1.run(it)?.let { (rest1, result1) ->
-            p2.run(rest1)?.let { (rest2, result2) ->
-                p3.run(rest2)?.let { (rest3, result3) ->
-                    p4.run(rest3)?.let { (rest4, result4) ->
-                        Pair(rest4, f(result1, result2, result3, result4))
-                    }
-                }
-            }
-        }
-    }
+    return map2({(r1, r2), (r3, r4) -> f(r1, r2, r3, r4) }, map2(::Pair, p1, p2), map2(::Pair, p3, p4))
 }
 
 fun <T> satisfy(predicate: (T) -> Boolean): Parser<Collection<T>, T> {

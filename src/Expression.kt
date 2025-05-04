@@ -9,7 +9,12 @@ sealed class Expression {
 
     data class Import(val path: List<String>) : Expression()
     data class Let(val name: Name, val expression: Expression) : Expression()
-    data class Function(val name: Name, val parameters: List<Name>, val body: List<Expression>) : Expression()
+    data class Function(
+        val name: Name,
+        val parameters: List<Name>,
+        val body: List<Expression>,
+        val annotations: List<Expression>
+    ) : Expression()
 }
 
 sealed class Literal {
@@ -69,11 +74,12 @@ fun <T> filterToken(f: (Token) -> T?): Parser<Collection<Token>, T> {
 fun token(s: String): Parser<Collection<Token>, String> {
     return filterToken {
         when (it) {
-            is Token.FixedToken -> if (it.string == s) {
-                s
-            } else {
-                null
-            }
+            is Token.FixedToken ->
+                if (it.string == s) {
+                    s
+                } else {
+                    null
+                }
 
             else -> null
         }
@@ -270,9 +276,21 @@ val ifExpression: Parser<Collection<Token>, Expression> = map3(
 
 val bodyExpression = choice(listOf(let, call, ret, ifExpression))
 
-val function: Parser<Collection<Token>, Expression> = map3(
-    { name, parameters, expressions -> Expression.Function(name, parameters, expressions) },
-    second(token("fn"), name), parens(sepByTrailing(name, token(","))), block
+val annotation: Parser<Collection<Token>, Expression> =
+    map3({ _, v, c ->
+        if (c != null) {
+            c(v)
+        } else {
+            v
+        }
+    }, token("@"), variable, optional(callFn))
+
+val function: Parser<Collection<Token>, Expression> = map4(
+    { annotations, name, parameters, expressions -> Expression.Function(name, parameters, expressions, annotations) },
+    many(annotation),
+    second(token("fn"), name),
+    parens(sepByTrailing(name, token(","))),
+    block
 )
 
 val import: Parser<Collection<Token>, Expression> = map(
@@ -284,5 +302,5 @@ val topExpression = choice(listOf(import, let, function))
 
 fun parse(string: String): List<Expression>? {
     val tokens = lex(string)
-    return tokens?.let { parseTilEnd(many(topExpression), it) }
+    return tokens?.let { parseCompletely(many(topExpression), it) }
 }

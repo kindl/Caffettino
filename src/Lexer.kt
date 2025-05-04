@@ -47,7 +47,6 @@ val templateString: Parser<String, List<Token>> =
         templateStringEnd
     )
 
-
 val digits = mapNullable({
     if (it == "") {
         null
@@ -85,7 +84,8 @@ val anyNumber: Parser<String, Token> = map4({ digs, dot, expo, spec ->
     }
 }, digitsWithOptionalSign, optional(dotPart), optional(exponentPart), optional(specifier))
 
-val dotsAndParens = listOf(".", ",", ";", "(", ")", "[", "]", "{", "}")
+val dotsAndParens = listOf("@", ".", ",", ";", "(", ")", "[", "]", "{", "}")
+
 val operators = listOf("==", "<=", ">=", "!=", "&&", "||", "!", "^", "?", ":", "+", "-", "*", "/", "%", "<", ">", "=")
 
 val fixed: Parser<String, Token> =
@@ -118,5 +118,5 @@ val lexeme = choice(listOf(comment, whitespace, stringToken, anyNumber, fixed, i
 val lexemes = map({ it.flatten() }, many(or(map({ listOf(it) }, lexeme), templateString)))
 
 fun lex(string: String): List<Token>? {
-    return parseStringTilEnd(lexemes, string)?.filter { isSignificant(it) }
+    return parseStringCompletely(lexemes, string)?.filter { isSignificant(it) }
 }

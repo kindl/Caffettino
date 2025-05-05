@@ -47,13 +47,7 @@ val templateString: Parser<String, List<Token>> =
         templateStringEnd
     )
 
-val digits = mapNullable({
-    if (it == "") {
-        null
-    } else {
-        it
-    }
-}, takeWhile { it.isDigit() })
+val digits = takeWhile1 { it.isDigit() }
 
 val digitsWithOptionalSign = map2(
     { sign, digs -> (sign?.toString().orEmpty()) + digs },
@@ -103,7 +97,7 @@ val comment: Parser<String, Token> =
     map2({ _, c -> Token.CommentToken(c) }, takeString("//"), takeWhile { it != '\n' })
 
 val whitespace: Parser<String, Token> =
-    map2({ a, b -> Token.WhitespaceToken(a + b) }, satisfyChar { it.isWhitespace() }, takeWhile { it.isWhitespace() })
+    map({ a -> Token.WhitespaceToken(a) }, takeWhile1 { it.isWhitespace() })
 
 fun identifierOrFixedToken(s: String): Token {
     return if (keywords.contains(s)) {

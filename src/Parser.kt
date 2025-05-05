@@ -117,7 +117,7 @@ fun <S, T, U, V> map2(f: (T, U) -> V, p1: Parser<S, T>, p2: Parser<S, U>): Parse
 }
 
 fun <S, T, U, V, W> map3(f: (T, U, V) -> W, p1: Parser<S, T>, p2: Parser<S, U>, p3: Parser<S, V>): Parser<S, W> {
-    return map2({r1, (r2, r3) -> f(r1, r2, r3)}, p1, map2(::Pair, p2, p3))
+    return map2({ r1, (r2, r3) -> f(r1, r2, r3) }, p1, map2(::Pair, p2, p3))
 }
 
 fun <S, T, U, V, W, X> map4(
@@ -127,7 +127,7 @@ fun <S, T, U, V, W, X> map4(
     p3: Parser<S, V>,
     p4: Parser<S, W>
 ): Parser<S, X> {
-    return map2({(r1, r2), (r3, r4) -> f(r1, r2, r3, r4) }, map2(::Pair, p1, p2), map2(::Pair, p3, p4))
+    return map2({ (r1, r2), (r3, r4) -> f(r1, r2, r3, r4) }, map2(::Pair, p1, p2), map2(::Pair, p3, p4))
 }
 
 fun <T> satisfy(predicate: (T) -> Boolean): Parser<Collection<T>, T> {
@@ -158,6 +158,10 @@ fun takeWhile(predicate: (Char) -> Boolean): Parser<String, String> {
     return Parser { input ->
         Pair(input.dropWhile(predicate), input.takeWhile(predicate))
     }
+}
+
+fun takeWhile1(predicate: (Char) -> Boolean): Parser<String, String> {
+    return mapNullable({ it.ifEmpty { null } }, takeWhile(predicate))
 }
 
 fun takeString(s: String): Parser<String, String> {

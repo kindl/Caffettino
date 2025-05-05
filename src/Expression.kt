@@ -28,14 +28,24 @@ sealed class Literal {
 
 fun pretty(l: Literal): String {
     return when (l) {
-        // TODO escape
-        is Literal.StringLiteral -> "\"" + l.string + "\""
+        is Literal.StringLiteral -> "\"" + escape(l.string) + "\""
         is Literal.BooleanLiteral -> l.bool.toString()
         is Literal.DoubleLiteral -> l.number.toString()
         is Literal.FloatLiteral -> l.number.toString() + "f"
         is Literal.IntLiteral -> l.number.toString()
         is Literal.LongLiteral -> l.number.toString() + "L"
     }
+}
+
+fun escape(string: String): String {
+    return string
+        .replace("\n", "\\n")
+        .replace("\t", "\\t")
+        .replace("\r", "\\r")
+        .replace("\b", "\\b")
+        .replace("\"", "\\\"")
+        .replace("\\", "\\\\")
+        .replace("\'", "\\\'")
 }
 
 fun pretty(e: Expression): String {
@@ -67,12 +77,12 @@ data class Name(val identifier: String, val type: Type)
 
 val next: Parser<Collection<Token>, Token> = satisfy { true }
 
-fun <T> filterToken(f: (Token) -> T?): Parser<Collection<Token>, T> {
+fun <T> mapNullableNext(f: (Token) -> T?): Parser<Collection<Token>, T> {
     return mapNullable(f, next)
 }
 
 fun token(s: String): Parser<Collection<Token>, String> {
-    return filterToken {
+    return mapNullableNext {
         when (it) {
             is Token.FixedToken ->
                 if (it.string == s) {
@@ -86,14 +96,14 @@ fun token(s: String): Parser<Collection<Token>, String> {
     }
 }
 
-val stringLiteral: Parser<Collection<Token>, Expression> = filterToken {
+val stringLiteral: Parser<Collection<Token>, Expression> = mapNullableNext {
     when (it) {
         is Token.StringToken -> Expression.Lit(Literal.StringLiteral(it.string))
         else -> null
     }
 }
 
-val numberLiteral: Parser<Collection<Token>, Expression> = filterToken {
+val numberLiteral: Parser<Collection<Token>, Expression> = mapNullableNext {
     when (it) {
         is Token.IntToken -> Expression.Lit(Literal.IntLiteral(it.number))
         is Token.LongToken -> Expression.Lit(Literal.LongLiteral(it.number))
@@ -103,7 +113,7 @@ val numberLiteral: Parser<Collection<Token>, Expression> = filterToken {
     }
 }
 
-val identifier = filterToken {
+val identifier = mapNullableNext {
     when (it) {
         is Token.IdentifierToken -> it.string
         else -> null
@@ -128,7 +138,6 @@ fun <T> braces(p: Parser<Collection<Token>, T>): Parser<Collection<Token>, T> {
     return map3({ _, r, _ -> r }, token("{"), p, token("}"))
 }
 
-// val expr = defer { composedExpression }
 val expr: Parser<Collection<Token>, Expression> = defer { orExpression }
 
 val callFn: Parser<Collection<Token>, (Expression) -> Expression> =
@@ -137,7 +146,7 @@ val callFn: Parser<Collection<Token>, (Expression) -> Expression> =
 val dotFn: Parser<Collection<Token>, (Expression) -> Expression> =
     map({ name -> { e: Expression -> Expression.Dot(e, name) } }, second(token("."), name))
 
-val templateStringLiteralPart: Parser<Collection<Token>, Expression> = filterToken {
+val templateStringLiteralPart: Parser<Collection<Token>, Expression> = mapNullableNext {
     when (it) {
         is Token.TemplateStringPartToken -> Expression.Lit(Literal.StringLiteral(it.string))
         else -> null
@@ -176,7 +185,7 @@ fun operatorToFunction(operator: String): String {
         "/" -> "div"
         "%" -> "rem"
         "==" -> "equals"
-        "!=" -> "notEquals"
+        "!=" -> "notEqual"
         ">=" -> "greaterOrEqual"
         "<=" -> "lesserOrEqual"
         "<" -> "lesser"
@@ -277,13 +286,13 @@ val ifExpression: Parser<Collection<Token>, Expression> = map3(
 val bodyExpression = choice(listOf(let, call, ret, ifExpression))
 
 val annotation: Parser<Collection<Token>, Expression> =
-    map3({ _, v, c ->
-        if (c != null) {
-            c(v)
-        } else {
+    map2({ v, c ->
+        if (c == null) {
             v
+        } else {
+            c(v)
         }
-    }, token("@"), variable, optional(callFn))
+    }, second(token("@"), variable), optional(callFn))
 
 val function: Parser<Collection<Token>, Expression> = map4(
     { annotations, name, parameters, expressions -> Expression.Function(name, parameters, expressions, annotations) },

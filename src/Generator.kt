@@ -1,4 +1,5 @@
 import java.lang.classfile.*
+import java.lang.classfile.instruction.OperatorInstruction
 import java.lang.constant.*
 import java.lang.reflect.AccessFlag
 import java.nio.file.Files
@@ -11,22 +12,7 @@ data class Context(val codeBuilder: CodeBuilder, val classDescriptor: ClassDesc,
 fun writeClassFile(name: String, expressions: List<Expression>) {
     val classDescriptor = ClassDesc.of(name)
     val bytes = ClassFile.of().build(classDescriptor) { classBuilder ->
-        classBuilder
-            .withFlags(ClassFile.ACC_PUBLIC)
-            .withMethod(
-                ConstantDescs.INIT_NAME, ConstantDescs.MTD_void,
-                ClassFile.ACC_PUBLIC
-            ) { methodBuilder ->
-                methodBuilder.withCode { codeBuilder ->
-                    codeBuilder.aload(0)
-                        .invokespecial(
-                            ConstantDescs.CD_Object,
-                            ConstantDescs.INIT_NAME, ConstantDescs.MTD_void
-                        )
-                        .return_()
-                }
-            }
-
+        generateEmptyConstructor(classBuilder)
         generateStaticConstructor(classBuilder, classDescriptor, expressions)
         generateFile(classBuilder, classDescriptor, expressions)
     }
@@ -44,6 +30,27 @@ fun generateFile(classBuilder: ClassBuilder, classDescriptor: ClassDesc, express
             else -> error("Generating expression " + expression + " not allowed at top level of a file")
         }
     }
+}
+
+fun generateEmptyConstructor(classBuilder: ClassBuilder) {
+    classBuilder
+        .withFlags(ClassFile.ACC_PUBLIC)
+        .withMethod(
+            ConstantDescs.INIT_NAME,
+            ConstantDescs.MTD_void,
+            ClassFile.ACC_PUBLIC
+        ) { methodBuilder ->
+            methodBuilder.withCode { codeBuilder ->
+                codeBuilder.aload(0)
+                    .invokespecial(
+                        ConstantDescs.CD_Object,
+                        ConstantDescs.INIT_NAME, ConstantDescs.MTD_void
+                    )
+                    .return_()
+            }
+        }
+
+
 }
 
 // generate a static field for a let expression
@@ -87,6 +94,7 @@ fun generateStaticFieldAssignment(context: Context, expression: Expression.Let) 
 fun generateFunction(classBuilder: ClassBuilder, classDescriptor: ClassDesc, function: Expression.Function) {
     val name = function.name.identifier
     val methodTypeDescriptor = getMethodTypeDescriptor(function.name)
+    val returnType = (function.name.type as Type.Arrow).returnType
     val flags = ClassFile.ACC_PUBLIC + ClassFile.ACC_STATIC
     classBuilder.withMethod(name, methodTypeDescriptor, flags) { methodBuilder ->
         methodBuilder.withCode { codeBuilder ->
@@ -94,9 +102,12 @@ fun generateFunction(classBuilder: ClassBuilder, classDescriptor: ClassDesc, fun
             val context = Context(codeBuilder, classDescriptor, locals)
             generateBlock(context, function.body)
 
-            // TODO check if return is void
             if (!endsWithReturn(function.body)) {
-                codeBuilder.return_()
+                if (returnType == Type.Concrete("void")) {
+                    codeBuilder.return_()
+                } else {
+                    error("Function " + function.name + " needs to return a value")
+                }
             }
         }
     }
@@ -110,6 +121,7 @@ fun endsWithReturn(expressions: List<Expression>): Boolean {
             lastExpression.elseBranch != null
                     && endsWithReturn(lastExpression.thenBranch)
                     && endsWithReturn(lastExpression.elseBranch)
+
         else -> false
     }
 }
@@ -180,12 +192,12 @@ fun generateIf(startContext: Context, ifExpression: Expression.If) {
 
 fun generateLet(context: Context, let: Expression.Let) {
     generateExpression(context, let.expression)
-    val index = context.locals.indexOfFirst { let.name.identifier == it.identifier }
     val typeKind = getTypeKind(let.name.type)
     if (typeKind == TypeKind.VoidType) {
         error("Cannot assign field " + let.name + " with a void type")
     }
 
+    val index = context.locals.indexOfFirst { let.name.identifier == it.identifier }
     context.codeBuilder.storeLocal(typeKind, index)
 }
 
@@ -200,7 +212,7 @@ fun generateCall(context: Context, call: Expression.Call) {
 fun generateVariableCall(context: Context, variable: Expression.Variable, arguments: List<Expression>) {
     val methodTypeDescriptor = getMethodTypeDescriptor(variable.name)
 
-    // TODO allow calling imported functions
+    // TODO imported functions
     // Here we basically assume, that calling a function always has the current class as owner
     // However, when importing, a different class will be the owner
     val ownerTypeDescriptor = context.classDescriptor
@@ -236,61 +248,10 @@ fun generateDotCall(context: Context, dot: Expression.Dot, arguments: List<Expre
     // loadlocal
     // InvokeDynamic with some function info on someLambda
     // invokevirtual forEach
-    if (ownerTypeDescriptor.descriptorString() == "I") {
-        when (dot.name.identifier) {
-            "equals" -> context.codeBuilder.ifThenElse(Opcode.IF_ICMPEQ, { it.iconst_1() }, { it.iconst_0() })
-            "greaterOrEqual" -> context.codeBuilder.ifThenElse(Opcode.IF_ICMPGE, { it.iconst_1() }, { it.iconst_0() })
-            "greater" -> context.codeBuilder.ifThenElse(Opcode.IF_ICMPGT, { it.iconst_1() }, { it.iconst_0() })
-            "lesserOrEqual" -> context.codeBuilder.ifThenElse(Opcode.IF_ICMPLE, { it.iconst_1() }, { it.iconst_0() })
-            "lesser" -> context.codeBuilder.ifThenElse(Opcode.IF_ICMPLT, { it.iconst_1() }, { it.iconst_0() })
-            "plus" -> context.codeBuilder.iadd()
-            "minus" -> context.codeBuilder.isub()
-            "times" -> context.codeBuilder.imul()
-            "div" -> context.codeBuilder.idiv()
-            "rem" -> context.codeBuilder.irem()
-            else -> error("Unknown primitive int call " + dot.name)
-        }
-    } else if (ownerTypeDescriptor.descriptorString() == "F") {
-        // fcmpl and fcmpg seem switched in these branches, but lead to the correct output in the disassembly
-        when (dot.name.identifier) {
-            "equals" -> {
-                context.codeBuilder.fcmpl()
-                context.codeBuilder.ifThenElse({ it.iconst_1() }, { it.iconst_0() })
-            }
-
-            "greaterOrEqual" -> {
-                context.codeBuilder.fcmpl()
-                context.codeBuilder.ifThenElse(Opcode.IFGE, { it.iconst_1() }, { it.iconst_0() })
-            }
-
-            "greater" -> {
-                context.codeBuilder.fcmpl()
-                context.codeBuilder.ifThenElse(Opcode.IFGT, { it.iconst_1() }, { it.iconst_0() })
-            }
-
-            "lesserOrEqual" -> {
-                context.codeBuilder.fcmpg()
-                context.codeBuilder.ifThenElse(Opcode.IFLE, { it.iconst_1() }, { it.iconst_0() })
-            }
-
-            "lesser" -> {
-                context.codeBuilder.fcmpg()
-                context.codeBuilder.ifThenElse(Opcode.IFLT, { it.iconst_1() }, { it.iconst_0() })
-            }
-
-            "plus" -> context.codeBuilder.fadd()
-            "minus" -> context.codeBuilder.fsub()
-            "times" -> context.codeBuilder.fmul()
-            "div" -> context.codeBuilder.fdiv()
-            "rem" -> context.codeBuilder.frem()
-            else -> error("Unknown primitive float call " + dot.name)
-        }
-    } else if (ownerTypeDescriptor.descriptorString() == "Z") {
-        when (dot.name.identifier) {
-            "not" -> context.codeBuilder.ifThenElse(Opcode.IFEQ, { it.iconst_1() }, { it.iconst_0() })
-        }
+    if (isPrimitive(ownerType)) {
+        generatePrimitiveCall(context, ownerTypeDescriptor, dot.name.identifier)
     } else if (isVirtual(dot)) {
-        // Often a call is virtual, but in some cases the return is an interface, requiring invokeinterface on calls
+        // Often a call is virtual, but in some cases the return is an interface, requiring invokeinterface
         // for example for `List.of("hi", "there").toString()`
         if (isInterface(ownerType)) {
             context.codeBuilder.invokeinterface(ownerTypeDescriptor, dot.name.identifier, methodTypeDescriptor)
@@ -301,6 +262,80 @@ fun generateDotCall(context: Context, dot: Expression.Dot, arguments: List<Expre
         // Necessary for static interface methods like List.of()
         val isInterface = isInterface(ownerType)
         context.codeBuilder.invokestatic(ownerTypeDescriptor, dot.name.identifier, methodTypeDescriptor, isInterface)
+    }
+}
+
+
+// TODO doubles
+// TODO conversion functions
+// TODO logical functions
+fun generatePrimitiveCall(context: Context, ownerTypeDescriptor: ClassDesc, identifier: String) {
+    if (ownerTypeDescriptor.descriptorString() == "I") {
+        when (identifier) {
+            "equals" -> context.codeBuilder.ifThenElse(Opcode.IF_ICMPEQ, { it.iconst_1() }, { it.iconst_0() })
+            "notEqual" -> context.codeBuilder.ifThenElse(Opcode.IF_ICMPNE, { it.iconst_1() }, { it.iconst_0() })
+            "greaterOrEqual" -> context.codeBuilder.ifThenElse(Opcode.IF_ICMPGE, { it.iconst_1() }, { it.iconst_0() })
+            "greater" -> context.codeBuilder.ifThenElse(Opcode.IF_ICMPGT, { it.iconst_1() }, { it.iconst_0() })
+            "lesserOrEqual" -> context.codeBuilder.ifThenElse(Opcode.IF_ICMPLE, { it.iconst_1() }, { it.iconst_0() })
+            "lesser" -> context.codeBuilder.ifThenElse(Opcode.IF_ICMPLT, { it.iconst_1() }, { it.iconst_0() })
+            "plus" -> context.codeBuilder.iadd()
+            "minus" -> context.codeBuilder.isub()
+            "times" -> context.codeBuilder.imul()
+            "div" -> context.codeBuilder.idiv()
+            "rem" -> context.codeBuilder.irem()
+            else -> error("Unknown primitive int call " + identifier)
+        }
+    } else if (ownerTypeDescriptor.descriptorString() == "L") {
+        when (identifier) {
+            "equals" -> context.codeBuilder.lcmp().ifThenElse(Opcode.IFEQ, { it.iconst_1() }, { it.iconst_0() })
+            "notEqual" -> context.codeBuilder.lcmp().ifThenElse(Opcode.IFNE, { it.iconst_1() }, { it.iconst_0() })
+            "greaterOrEqual" -> context.codeBuilder.lcmp().ifThenElse(Opcode.IFGE, { it.iconst_1() }, { it.iconst_0() })
+            "greater" -> context.codeBuilder.lcmp().ifThenElse(Opcode.IFGT, { it.iconst_1() }, { it.iconst_0() })
+            "lesserOrEqual" -> context.codeBuilder.lcmp().ifThenElse(Opcode.IFLE, { it.iconst_1() }, { it.iconst_0() })
+            "lesser" -> context.codeBuilder.lcmp().ifThenElse(Opcode.IFLT, { it.iconst_1() }, { it.iconst_0() })
+            "plus" -> context.codeBuilder.ladd()
+            "minus" -> context.codeBuilder.lsub()
+            "times" -> context.codeBuilder.lmul()
+            "div" -> context.codeBuilder.ldiv()
+            "rem" -> context.codeBuilder.lrem()
+            else -> error("Unknown primitive long call " + identifier)
+        }
+    } else if (ownerTypeDescriptor.descriptorString() == "F") {
+        when (identifier) {
+            // fcmpl and fcmpg seem switched in these branches, but lead to the correct output in the disassembly
+            "equals" -> context.codeBuilder.fcmpg().ifThenElse(Opcode.IFEQ, { it.iconst_1() }, { it.iconst_0() })
+            "notEqual" -> context.codeBuilder.fcmpg().ifThenElse(Opcode.IFNE, { it.iconst_1() }, { it.iconst_0() })
+            "greaterOrEqual" -> context.codeBuilder.fcmpl().ifThenElse(Opcode.IFGE, { it.iconst_1() }, { it.iconst_0() })
+            "greater" -> context.codeBuilder.fcmpl().ifThenElse(Opcode.IFGT, { it.iconst_1() }, { it.iconst_0() })
+            "lesserOrEqual" -> context.codeBuilder.fcmpg().ifThenElse(Opcode.IFLE, { it.iconst_1() }, { it.iconst_0() })
+            "lesser" -> context.codeBuilder.fcmpg().ifThenElse(Opcode.IFLT, { it.iconst_1() }, { it.iconst_0() })
+            "plus" -> context.codeBuilder.fadd()
+            "minus" -> context.codeBuilder.fsub()
+            "times" -> context.codeBuilder.fmul()
+            "div" -> context.codeBuilder.fdiv()
+            "rem" -> context.codeBuilder.frem()
+            else -> error("Unknown primitive float call " + identifier)
+        }
+    } else if (ownerTypeDescriptor.descriptorString() == "D") {
+        when (identifier) {
+            "equals" -> context.codeBuilder.dcmpg().ifThenElse(Opcode.IFEQ, { it.iconst_1() }, { it.iconst_0() })
+            "notEqual" -> context.codeBuilder.dcmpg().ifThenElse(Opcode.IFNE, { it.iconst_1() }, { it.iconst_0() })
+            "greaterOrEqual" -> context.codeBuilder.dcmpl().ifThenElse(Opcode.IFGE, { it.iconst_1() }, { it.iconst_0() })
+            "greater" -> context.codeBuilder.dcmpl().ifThenElse(Opcode.IFGT, { it.iconst_1() }, { it.iconst_0() })
+            "lesserOrEqual" -> context.codeBuilder.dcmpg().ifThenElse(Opcode.IFLE, { it.iconst_1() }, { it.iconst_0() })
+            "lesser" -> context.codeBuilder.dcmpg().ifThenElse(Opcode.IFLT, { it.iconst_1() }, { it.iconst_0() })
+            "plus" -> context.codeBuilder.dadd()
+            "minus" -> context.codeBuilder.dsub()
+            "times" -> context.codeBuilder.dmul()
+            "div" -> context.codeBuilder.ddiv()
+            "rem" -> context.codeBuilder.drem()
+            else -> error("Unknown primitive double call " + identifier)
+        }
+    } else if (ownerTypeDescriptor.descriptorString() == "Z") {
+        when (identifier) {
+            "not" -> context.codeBuilder.ifThenElse(Opcode.IFEQ, { it.iconst_1() }, { it.iconst_0() })
+            else -> error("Unknown primitive bool call " + identifier)
+        }
     }
 }
 
@@ -358,11 +393,11 @@ fun generateDot(context: Context, dot: Expression.Dot) {
     val fieldType = getClassDescriptor(dot.name.type)
     val ownerType = readType(dot.expression)
     val ownerTypeDescriptor = getClassDescriptor(ownerType)
-    if (isStatic(dot)) {
-        context.codeBuilder.getstatic(ownerTypeDescriptor, dot.name.identifier, fieldType)
-    } else {
+    if (isVirtual(dot)) {
         generateExpression(context, dot.expression)
         context.codeBuilder.getfield(ownerTypeDescriptor, dot.name.identifier, fieldType)
+    } else {
+        context.codeBuilder.getstatic(ownerTypeDescriptor, dot.name.identifier, fieldType)
     }
 }
 
@@ -382,7 +417,7 @@ fun getClassDescriptor(type: Type): ClassDesc {
             "Any" -> ConstantDescs.CD_Object
             else ->
                 if (type.name.startsWith("[") && type.name.endsWith("]")) {
-                    // TODO handle array or arrays
+                    // TODO handle arrays recursively
                     val innerName = type.name.substring(1, type.name.length - 1)
                     ClassDesc.ofInternalName(innerName).arrayType()
                 } else {
@@ -431,6 +466,7 @@ fun getMethodTypeDescriptor(name: Name): MethodTypeDesc {
         is Type.Arrow -> MethodTypeDesc.of(
             getClassDescriptor(name.type.returnType),
             name.type.parameterTypes.map { getClassDescriptor(it) })
+
         is Type.Concrete -> error("Unexpected type " + name.type.name + " for function " + name.identifier)
     }
 }

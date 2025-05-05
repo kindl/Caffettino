@@ -138,8 +138,8 @@ fun resolveDotCall(
     if (!isPrimitive(leftType) && resolvedArguments.count() == 1) {
         if (isComparison(dot.name.identifier)) {
             return makeComparison(dot.name.identifier, resolvedExpression, resolvedArguments.first())
-        } else if (dot.name.identifier == "notEquals") {
-            return makeNotEquals(resolvedExpression, resolvedArguments.first())
+        } else if (dot.name.identifier == "notEqual") {
+            return makeNotEqual(resolvedExpression, resolvedArguments.first())
         } else if (dot.name.identifier == "plus" && leftType == stringType) {
             return makeConcat(resolvedExpression, resolvedArguments.first())
         }
@@ -162,8 +162,8 @@ fun makeComparison(identifier: String, left: Expression, right: Expression): Exp
     )
 }
 
-// rewrite a.notEquals(b) to a.equals(b).not()
-fun makeNotEquals(left: Expression, right: Expression): Expression.Call {
+// rewrite a.notEqual(b) to a.equals(b).not()
+fun makeNotEqual(left: Expression, right: Expression): Expression.Call {
     val equalsType = Type.Arrow(Type.Concrete("bool"), listOf(any))
     val notType = Type.Arrow(Type.Concrete("bool"), listOf())
     val equalsPart = Expression.Call(Expression.Dot(left, Name("equals", equalsType)), listOf(right))
@@ -196,12 +196,12 @@ fun resolveDot(dot: Expression.Dot, environment: Environment): Expression {
 }
 
 fun getMethodType(type: Type, accessor: String, argumentTypes: List<Type>): Type {
-    // TODO read pseudo class file for primitive types
-    // instead of specifying all those primitive calls in code
+    // TODO read pseudo class file instead of specifying all those primitive calls in code
     if (isPrimitive(type)) {
         return when (accessor) {
             "plus", "minus" -> Type.Arrow(type, listOf(type))
             "equals" -> Type.Arrow(Type.Concrete("bool"), listOf(type))
+            "notEqual" -> Type.Arrow(Type.Concrete("bool"), listOf(type))
             "not" -> Type.Arrow(Type.Concrete("bool"), listOf())
             "compareTo" -> Type.Arrow(Type.Concrete("int"), listOf(type))
             "lesserOrEqual" -> Type.Arrow(Type.Concrete("int"), listOf(type))
@@ -214,29 +214,31 @@ fun getMethodType(type: Type, accessor: String, argumentTypes: List<Type>): Type
 
     val path = (type as Type.Concrete).name
     val classFile = getClassFile(path)
-    val options = getMethodsAndUpcastMethods(classFile).filter { it.methodName().stringValue() == accessor }
+    val options = getMethods(classFile).filter { it.methodName().stringValue() == accessor }
     val overloads = options.map { convertMethodType(it.methodType().stringValue()) }
 
-    // TODO improve handling of equals
-    // equals is a little bit special, because for example "Hi" == "there" will turn into
-    // "Hi".equals("there") and then we can't find an overload, because the argument is string and not object
-    // Solutions would be
-    // * auto conversion "Hi".equals(toObject("there"))
-    // * special case for equals, we might need this anyway for primitive types
-    // * some form of subtyping. If we can't find a function with a string argument,
-    //      turn it into object and search again. However, this could explode quickly
-    if (accessor == "equals") {
-        return overloads.first()
-    }
-
-    val methodType = overloads.firstOrNull { it.parameterTypes == argumentTypes }
+    val methodType = overloads.firstOrNull { zipAccepts(it.parameterTypes, argumentTypes) }
 
     return methodType
-        ?: error("Cannot find fitting overload for "
-                + accessor + " with arguments "
-                + argumentTypes + " in "
-                + overloads + " for owner "
-                + type)
+        ?: error(
+            "Cannot find fitting overload for "
+                    + accessor + " with arguments "
+                    + argumentTypes + " in "
+                    + overloads + " for owner "
+                    + type
+        )
+}
+
+fun zipAccepts(parameterTypes: List<Type>, argumentTypes: List<Type>): Boolean {
+    return parameterTypes.count() == argumentTypes.count()
+            && parameterTypes.zip(argumentTypes, { a, b -> accepts(a, b) }).all { it }
+}
+
+// if a function accepts an object as parameter, for example equals(Object o)
+// then it accepts any reference parameter
+fun accepts(parameterType: Type, argumentType: Type): Boolean {
+    return parameterType == argumentType
+            || (!isPrimitive(argumentType) && parameterType == any)
 }
 
 fun getClassFile(path: String): ClassModel {
@@ -257,18 +259,18 @@ fun getClassFile(path: String): ClassModel {
     return classFile
 }
 
-fun getMethodsAndUpcastMethods(classModel: ClassModel): List<MethodModel> {
-    val superclass = classModel.superclass();
-    val interfaces = classModel.interfaces();
-    println("Got " + superclass + " for " + classModel.thisClass().name().stringValue() + " with interfaces " + interfaces)
-    val superclassModel = superclass.map { getClassFile(it.name().stringValue()) }
-    val interfaceModels = interfaces.map { getClassFile(it.name().stringValue()) }
-    val superclassMethods = superclassModel.map { getMethodsAndUpcastMethods(it) }.orElse(emptyList())
-    val interfaceMethods = interfaceModels.flatMap { getMethodsAndUpcastMethods(it) }
+// returns the methods including parent and interface methods
+fun getMethods(classModel: ClassModel): List<MethodModel> {
+    val superclassModel = classModel.superclass().map { getClassFile(it.name().stringValue()) }
+    val interfaceModels = classModel.interfaces().map { getClassFile(it.name().stringValue()) }
+    val superclassMethods = superclassModel.map { getMethods(it) }.orElse(emptyList())
+    val interfaceMethods = interfaceModels.flatMap { getMethods(it) }
     return classModel.methods() + superclassMethods + interfaceMethods
 }
 
 // TODO non-static field access
+// public fields should be modeled with a getter
+// so instead of someObject.publicField, it should become someObject.publicField() or someObject.getPublicField()
 fun getAccessorType(type: Type, accessor: String): Type {
     val name = (type as Type.Concrete).name
     val path = if (name == "Any") {
@@ -324,8 +326,10 @@ fun getReturnType(expressions: List<Expression>): Type? {
         }
     }
 
-    // TODO check if the return types conform with each other
-    return types.firstOrNull()
+    // TODO find lower bound for the return type
+
+    // Prefer concrete types
+    return types.firstOrNull { it != any } ?: types.firstOrNull()
 }
 
 fun resolveAnnotation(expression: Expression, environment: Environment): Expression {
@@ -355,11 +359,4 @@ fun resolveFunction(function: Expression.Function, environment: Environment): Ex
     // TODO infer parameter types
     val resolvedName = Name(function.name.identifier, functionType)
     return Expression.Function(resolvedName, parameters, resolvedBody, resolvedAnnotations)
-}
-
-fun exploreClass(path: String) {
-    val classFile = getClassFile(path)
-    val methodTypes = classFile.methods().map { it.methodName().stringValue() + " " + convertMethodType(it.methodType().stringValue()) + " " + it }
-    val fieldTypes = classFile.fields().map { it.fieldName().stringValue() + " " + convertFieldType(it.fieldType().stringValue()) }
-    (methodTypes + fieldTypes).forEach { println(it) }
 }

@@ -1,29 +1,28 @@
 import java.lang.classfile.*
-import java.lang.classfile.instruction.OperatorInstruction
 import java.lang.constant.*
 import java.lang.reflect.AccessFlag
 import java.nio.file.Files
 import java.nio.file.Paths
 
 
-data class Context(val codeBuilder: CodeBuilder, val classDescriptor: ClassDesc, val locals: List<Name>)
+data class Context(val codeBuilder: CodeBuilder)
 
 
 fun writeClassFile(name: String, expressions: List<Expression>) {
     val classDescriptor = ClassDesc.of(name)
     val bytes = ClassFile.of().build(classDescriptor) { classBuilder ->
         generateEmptyConstructor(classBuilder)
-        generateStaticConstructor(classBuilder, classDescriptor, expressions)
-        generateFile(classBuilder, classDescriptor, expressions)
+        generateStaticConstructor(classBuilder, expressions)
+        generateFile(classBuilder, expressions)
     }
 
     Files.write(Paths.get(name + ".class"), bytes)
 }
 
-fun generateFile(classBuilder: ClassBuilder, classDescriptor: ClassDesc, expressions: List<Expression>) {
+fun generateFile(classBuilder: ClassBuilder, expressions: List<Expression>) {
     for (expression in expressions) {
         when (expression) {
-            is Expression.Function -> generateFunction(classBuilder, classDescriptor, expression)
+            is Expression.Function -> generateFunction(classBuilder, expression)
             is Expression.Let -> generateStaticFieldDescription(classBuilder, expression)
             // Nothing to do for imports
             is Expression.Import -> {}
@@ -61,14 +60,14 @@ fun generateStaticFieldDescription(classBuilder: ClassBuilder, expression: Expre
     classBuilder.withField(expression.name.identifier, descriptor, ClassFile.ACC_STATIC + ClassFile.ACC_PUBLIC)
 }
 
-fun generateStaticConstructor(classBuilder: ClassBuilder, classDescriptor: ClassDesc, expressions: List<Expression>) {
+fun generateStaticConstructor(classBuilder: ClassBuilder, expressions: List<Expression>) {
     classBuilder.withMethod(
         ConstantDescs.CLASS_INIT_NAME,
         ConstantDescs.MTD_void,
         ClassFile.ACC_STATIC
     ) { methodBuilder ->
         methodBuilder.withCode { codeBuilder ->
-            val context = Context(codeBuilder, classDescriptor, listOf())
+            val context = Context(codeBuilder)
 
             for (expression in expressions) {
                 if (expression is Expression.Let) {
@@ -81,25 +80,26 @@ fun generateStaticConstructor(classBuilder: ClassBuilder, classDescriptor: Class
     }
 }
 
-fun generateStaticFieldAssignment(context: Context, expression: Expression.Let) {
-    if (expression.name.type == Type.Concrete("void")) {
-        error("Cannot set static field " + expression.name + " with a void type")
+fun generateStaticFieldAssignment(context: Context, let: Expression.Let) {
+    if (let.name.type == Type.Concrete("void")) {
+        error("Cannot set static field " + let.name + " with a void type")
     }
 
-    generateExpression(context, expression.expression)
-    val type = getClassDescriptor(expression.name.type)
-    context.codeBuilder.putstatic(context.classDescriptor, expression.name.identifier, type)
+    generateExpression(context, let.expression)
+    val type = getClassDescriptor(let.name.type)
+    val ownerType = getOwnerType(let)
+    val ownerTypeDescriptor = getClassDescriptor(ownerType)
+    context.codeBuilder.putstatic(ownerTypeDescriptor, let.name.identifier, type)
 }
 
-fun generateFunction(classBuilder: ClassBuilder, classDescriptor: ClassDesc, function: Expression.Function) {
+fun generateFunction(classBuilder: ClassBuilder, function: Expression.Function) {
     val name = function.name.identifier
     val methodTypeDescriptor = getMethodTypeDescriptor(function.name)
     val returnType = (function.name.type as Type.Arrow).returnType
     val flags = ClassFile.ACC_PUBLIC + ClassFile.ACC_STATIC
     classBuilder.withMethod(name, methodTypeDescriptor, flags) { methodBuilder ->
         methodBuilder.withCode { codeBuilder ->
-            val locals = function.parameters + gatherLocals(function.body)
-            val context = Context(codeBuilder, classDescriptor, locals)
+            val context = Context(codeBuilder)
             generateBlock(context, function.body)
 
             if (!endsWithReturn(function.body)) {
@@ -124,29 +124,6 @@ fun endsWithReturn(expressions: List<Expression>): Boolean {
 
         else -> false
     }
-}
-
-// TODO avoid adding locals several times
-fun gatherLocals(expressions: List<Expression>): List<Name> {
-    val locals = expressions.flatMap { expression ->
-        when (expression) {
-            is Expression.If -> {
-                val thenLocals = gatherLocals(expression.thenBranch)
-                val elseLocals = if (expression.elseBranch != null) {
-                    gatherLocals(expression.elseBranch)
-                } else {
-                    listOf()
-                }
-
-                thenLocals + elseLocals
-            }
-
-            is Expression.Let -> listOf(expression.name)
-            else -> listOf()
-        }
-    }
-
-    return locals
 }
 
 fun generateBlock(context: Context, expressions: List<Expression>) {
@@ -176,15 +153,15 @@ fun generateIf(startContext: Context, ifExpression: Expression.If) {
     generateExpression(startContext, ifExpression.condition)
     if (ifExpression.elseBranch != null) {
         startContext.codeBuilder.ifThenElse({
-            val context = Context(it, startContext.classDescriptor, startContext.locals)
+            val context = Context(it)
             generateBlock(context, ifExpression.thenBranch)
         }, {
-            val context = Context(it, startContext.classDescriptor, startContext.locals)
+            val context = Context(it)
             generateBlock(context, ifExpression.elseBranch)
         })
     } else {
         startContext.codeBuilder.ifThen {
-            val context = Context(it, startContext.classDescriptor, startContext.locals)
+            val context = Context(it)
             generateBlock(context, ifExpression.thenBranch)
         }
     }
@@ -197,7 +174,7 @@ fun generateLet(context: Context, let: Expression.Let) {
         error("Cannot assign field " + let.name + " with a void type")
     }
 
-    val index = context.locals.indexOfFirst { let.name.identifier == it.identifier }
+    val index = (let.info as Info.Local).index
     context.codeBuilder.storeLocal(typeKind, index)
 }
 
@@ -215,7 +192,8 @@ fun generateVariableCall(context: Context, variable: Expression.Variable, argume
     // TODO imported functions
     // Here we basically assume, that calling a function always has the current class as owner
     // However, when importing, a different class will be the owner
-    val ownerTypeDescriptor = context.classDescriptor
+    val ownerType = getOwnerType(variable)
+    val ownerTypeDescriptor = getClassDescriptor(ownerType)
 
     for (expression in arguments) {
         generateExpression(context, expression)
@@ -229,11 +207,7 @@ fun generateDotCall(context: Context, dot: Expression.Dot, arguments: List<Expre
     val ownerType = readType(dot.expression)
     val ownerTypeDescriptor = getClassDescriptor(ownerType)
 
-    if (isVirtual(dot)) {
-        // generate the expression part, for example
-        // the System.out in System.out.println
-        generateExpression(context, dot.expression)
-    }
+    generateExpression(context, dot.expression)
 
     for (expression in arguments) {
         generateExpression(context, expression)
@@ -372,22 +346,29 @@ fun generateExpression(context: Context, expression: Expression) {
 }
 
 fun generateVariable(context: Context, variable: Expression.Variable) {
-    val index = context.locals.indexOfFirst { variable.name.identifier == it.identifier }
-    if (index != -1) {
-        val typeKind = getTypeKind(variable.name.type)
-        if (typeKind == TypeKind.VoidType) {
-            error("Cannot get a field " + variable.name + " with a void type")
+    when (variable.info) {
+        is Info.Local -> {
+            val typeKind = getTypeKind(variable.name.type)
+            if (typeKind == TypeKind.VoidType) {
+                error("Cannot get a field " + variable.name + " with a void type")
+            }
+
+            context.codeBuilder.loadLocal(typeKind, variable.info.index)
         }
 
-        context.codeBuilder.loadLocal(typeKind, index)
-    } else {
-        val fieldType = getClassDescriptor(variable.name.type)
-        // For now every variable is assumed to be a static field access
-        val ownerTypeDescriptor = context.classDescriptor
-        context.codeBuilder.getstatic(ownerTypeDescriptor, variable.name.identifier, fieldType)
+        is Info.Static -> {
+            val fieldType = getClassDescriptor(variable.name.type)
+            val ownerType = variable.info.ownerType
+            val ownerTypeDescriptor = getClassDescriptor(ownerType)
+            context.codeBuilder.getstatic(ownerTypeDescriptor, variable.name.identifier, fieldType)
+        }
+
+        is Info.Outside -> {
+            // Nothing to generate for static name references
+            // for example for System.out, System does not need to be generated
+        }
     }
 }
-
 
 fun generateDot(context: Context, dot: Expression.Dot) {
     val fieldType = getClassDescriptor(dot.name.type)
@@ -449,16 +430,11 @@ fun getTypeKind(type: Type): TypeKind {
     }
 }
 
-// TODO determine if variable is static from environment
-fun isStatic(dot: Expression.Dot): Boolean {
-    return when (dot.expression) {
-        is Expression.Variable -> dot.expression.name.identifier.first().isUpperCase()
-        else -> false
-    }
-}
-
 fun isVirtual(dot: Expression.Dot): Boolean {
-    return !isStatic(dot)
+    return when (dot.expression) {
+        is Expression.Variable -> dot.expression.info !is Info.Outside
+        else -> true
+    }
 }
 
 fun getMethodTypeDescriptor(name: Name): MethodTypeDesc {
@@ -468,5 +444,13 @@ fun getMethodTypeDescriptor(name: Name): MethodTypeDesc {
             name.type.parameterTypes.map { getClassDescriptor(it) })
 
         is Type.Concrete -> error("Unexpected type " + name.type.name + " for function " + name.identifier)
+    }
+}
+
+fun getOwnerType(expression: Expression): Type {
+    return when (expression) {
+        is Expression.Let -> if (expression.info is Info.Static) { expression.info.ownerType } else { error("Cannot read owner type of " + expression) }
+        is Expression.Variable -> if (expression.info is Info.Static) { expression.info.ownerType } else { error("Cannot read owner type of " + expression) }
+        else -> error("Cannot read owner type of " + expression)
     }
 }

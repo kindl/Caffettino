@@ -39,7 +39,7 @@ fun resolveLet(let: Expression.Let, environment: Environment): Expression.Let {
     val resolvedExpression = resolveExpression(let.expression, environment)
     val type = readType(resolvedExpression)
     val resolvedName = Name(let.name.identifier, type)
-    return Expression.Let(resolvedName, resolvedExpression)
+    return Expression.Let(resolvedName, resolvedExpression, let.info)
 }
 
 fun resolveExpression(expression: Expression, environment: Environment): Expression {
@@ -290,7 +290,7 @@ fun getAccessorType(type: Type, accessor: String): Type {
 
 fun resolveVariable(variable: Expression.Variable, environment: Environment): Expression.Variable {
     val type = environment[variable.name.identifier] ?: error("Not found " + variable.name.identifier)
-    return Expression.Variable(Name(variable.name.identifier, type))
+    return Expression.Variable(Name(variable.name.identifier, type), variable.info)
 }
 
 fun resolveBlock(expressions: List<Expression>, startEnvironment: Environment): List<Expression> {
@@ -339,13 +339,7 @@ fun resolveAnnotation(expression: Expression, environment: Environment): Express
 fun resolveFunction(function: Expression.Function, environment: Environment): Expression.Function {
     val resolvedAnnotations = function.annotations.map { resolveAnnotation(it, environment) }
 
-    val parameters = if (function.name.identifier == "main") {
-        println("Changing parameters for main function")
-        listOf(Name("args", Type.Concrete("[java/lang/String]")))
-    } else {
-        function.parameters
-    }
-
+    val parameters = function.parameters
     // TODO recursion
     // val returnType = any
     // val functionType = Type.Arrow(returnType, parameterPairs.map { it.second })

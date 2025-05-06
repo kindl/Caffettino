@@ -1,14 +1,14 @@
 sealed class Expression {
     data class Lit(val literal: Literal) : Expression()
     data class Call(val function: Expression, val arguments: List<Expression>) : Expression()
-    data class Variable(val name: Name) : Expression()
+    data class Variable(val name: Name, val info: Info) : Expression()
     data class Dot(val expression: Expression, val name: Name) : Expression()
     data class Return(val expression: Expression?) : Expression()
     data class If(val condition: Expression, val thenBranch: List<Expression>, val elseBranch: List<Expression>?) :
         Expression()
 
     data class Import(val path: List<String>) : Expression()
-    data class Let(val name: Name, val expression: Expression) : Expression()
+    data class Let(val name: Name, val expression: Expression, val info: Info) : Expression()
     data class Function(
         val name: Name,
         val parameters: List<Name>,
@@ -122,7 +122,7 @@ val identifier = mapNullableNext {
 
 val name = map({ Name(it, any) }, identifier)
 
-val variable: Parser<Collection<Token>, Expression> = map({ Expression.Variable(it) }, name)
+val variable: Parser<Collection<Token>, Expression> = map({ Expression.Variable(it, unsetInfo) }, name)
 
 val booleanLiteral: Parser<Collection<Token>, Expression> =
     or(
@@ -264,7 +264,7 @@ val call: Parser<Collection<Token>, Expression> = mapNullable({
 }, composedExpression)
 
 val let: Parser<Collection<Token>, Expression> = map2(
-    { name, expression -> Expression.Let(name, expression) },
+    { name, expression -> Expression.Let(name, expression, unsetInfo) },
     second(token("let"), name), second(token("="), expr)
 )
 

@@ -2,17 +2,25 @@ import java.lang.classfile.*
 import java.lang.reflect.AccessFlag
 
 
-typealias Environment = Map<String, Type>
+data class Environment(val types: Map<String, Type>)
+
+fun Environment.addMany(types: List<Pair<String, Type>>): Environment {
+    return Environment(this.types + types)
+}
+
+fun Environment.add(key: String, value: Type): Environment {
+    return Environment(this.types + Pair(key, value))
+}
 
 
 fun resolveFile(expressions: List<Expression>): List<Expression> {
-    var environment = mapOf<String, Type>()
+    var environment = Environment(mapOf<String, Type>())
 
     return expressions.map { expression ->
         when (expression) {
             is Expression.Function -> {
                 val resolved = resolveFunction(expression, environment)
-                environment = environment + Pair(resolved.name.identifier, resolved.name.type)
+                environment = environment.add(resolved.name.identifier, resolved.name.type)
                 resolved
             }
 
@@ -20,13 +28,13 @@ fun resolveFile(expressions: List<Expression>): List<Expression> {
                 val path = expression.path.joinToString("/")
                 val classFile = getClassFile(path)
                 // TODO decide how to add classes to the env
-                environment = environment + Pair(expression.path.last(), Type.Concrete(path))
+                environment = environment.add(expression.path.last(), Type.Concrete(path))
                 expression
             }
 
             is Expression.Let -> {
                 val resolved = resolveLet(expression, environment)
-                environment = environment + Pair(resolved.name.identifier, resolved.name.type)
+                environment = environment.add(resolved.name.identifier, resolved.name.type)
                 resolved
             }
 
@@ -126,6 +134,9 @@ fun resolveVariableCall(
     return Expression.Call(resolvedVariable, resolvedArguments)
 }
 
+// TODO primitive calls in functions like
+// `fun eq(a) { return a == 2 }` or `fun pl(a) { a + 2 }`
+// should turn parameters into their primitive types
 fun resolveDotCall(
     dot: Expression.Dot,
     environment: Environment,
@@ -141,6 +152,7 @@ fun resolveDotCall(
         } else if (dot.name.identifier == "notEqual") {
             return makeNotEqual(resolvedExpression, resolvedArguments.first())
         } else if (dot.name.identifier == "plus" && leftType == stringType) {
+            // TODO separate concat operator?
             return makeConcat(resolvedExpression, resolvedArguments.first())
         }
     }
@@ -177,10 +189,22 @@ fun makeConcat(left: Expression, right: Expression): Expression.Call {
 
 fun isPrimitive(type: Type): Boolean {
     return listOf(
-        Type.Concrete("int"), Type.Concrete("long"),
-        Type.Concrete("float"), Type.Concrete("double"),
+        Type.Concrete("int"),
+        Type.Concrete("long"),
+        Type.Concrete("float"),
+        Type.Concrete("double"),
         Type.Concrete("bool")
     ).contains(type)
+}
+
+fun isPrimitiveOperation(identifier: String): Boolean {
+    return listOf(
+        "plus", "minus",
+        "times", "div",
+        "rem",
+        "equals", "notEquals",
+        "lesser", "lesserOrEqual",
+        "greater", "greaterOrEqual").contains(identifier)
 }
 
 fun isComparison(identifier: String): Boolean {
@@ -289,7 +313,7 @@ fun getAccessorType(type: Type, accessor: String): Type {
 }
 
 fun resolveVariable(variable: Expression.Variable, environment: Environment): Expression.Variable {
-    val type = environment[variable.name.identifier] ?: error("Not found " + variable.name.identifier)
+    val type = environment.types[variable.name.identifier] ?: error("Not found " + variable.name.identifier)
     return Expression.Variable(Name(variable.name.identifier, type), variable.info)
 }
 
@@ -302,7 +326,7 @@ fun resolveBlock(expressions: List<Expression>, startEnvironment: Environment): 
             is Expression.If -> resolveIf(it, environment)
             is Expression.Let -> {
                 val resolved = resolveLet(it, environment)
-                environment = environment + Pair(resolved.name.identifier, resolved.name.type)
+                environment = environment.add(resolved.name.identifier, resolved.name.type)
                 resolved
             }
 
@@ -344,7 +368,7 @@ fun resolveFunction(function: Expression.Function, environment: Environment): Ex
     // val returnType = any
     // val functionType = Type.Arrow(returnType, parameterPairs.map { it.second })
     // environment[function.name.identifier] = functionType
-    val localEnvironment = environment + parameters.map { Pair(it.identifier, it.type) }
+    val localEnvironment = environment.addMany(parameters.map { Pair(it.identifier, it.type) })
 
     val resolvedBody = resolveBlock(function.body, localEnvironment)
     val returnType = getReturnType(resolvedBody) ?: Type.Concrete("void")

@@ -1,0 +1,3 @@
+// Test variable shadowing error
+let message = "Hi"
+let message = "Wait a minute"

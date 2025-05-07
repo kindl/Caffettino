@@ -1,0 +1,6 @@
+// Test if we generate a main function with correct type
+import java.lang.System
+
+fn main(args) {
+    System.out.println("Hello world!")
+}

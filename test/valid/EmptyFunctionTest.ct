@@ -1,0 +1,3 @@
+// Test that a return is added to an empty function
+fn skip() {
+}

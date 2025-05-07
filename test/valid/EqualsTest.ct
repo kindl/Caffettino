@@ -1,0 +1,5 @@
+// Test if the correct equals is selected
+
+fn check() {
+    return "Hi" == "Ho"
+}

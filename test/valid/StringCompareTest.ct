@@ -1,0 +1,34 @@
+// Test rewrite of comparisons
+let s = "test"
+
+fn lesserOrEqual(a) {
+    if (s <= a) {
+        return "True"
+    } else {
+        return "False"
+    }
+}
+
+fn greaterOrEqual(a) {
+    if (s >= a) {
+        return "True"
+    } else {
+        return "False"
+    }
+}
+
+fn greater(a) {
+    if (s > a) {
+        return "True"
+    } else {
+        return "False"
+    }
+}
+
+fn lesser(a) {
+    if (s < a) {
+        return "True"
+    } else {
+        return "False"
+    }
+}

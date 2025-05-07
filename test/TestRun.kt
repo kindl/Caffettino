@@ -1,6 +1,7 @@
 import org.junit.jupiter.api.Test
 import java.nio.file.Files
 import java.nio.file.Path
+import kotlin.io.path.*
 
 
 class TestRun {
@@ -41,6 +42,7 @@ class TestRun {
                 try {
                     generate(out, file.nameWithoutExtension, parsed)
                 } catch (exception: Exception) {
+                    println("Successfully errored with message " + exception.message)
                     return
                 }
 

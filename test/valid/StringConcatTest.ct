@@ -1,0 +1,9 @@
+// Test string concatenation
+import java.lang.System
+
+fn main() {
+    System.out.println("Enter your name:")
+    let console = System.console()
+    let name = console.readLine()
+    System.out.println("Hello " + name + "!")
+}

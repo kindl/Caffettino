@@ -1,0 +1,4 @@
+// This test is to figure out if we can chain functions
+fn chain() {
+    return "Hi".toString().toString().toString()
+}

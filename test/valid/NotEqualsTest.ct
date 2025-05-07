@@ -1,0 +1,8 @@
+// Test rewrite of notEquals
+fn notEqual(a, b) {
+    if (a != b) {
+        return "Not equal"
+    } else {
+        return "Equal"
+    }
+}

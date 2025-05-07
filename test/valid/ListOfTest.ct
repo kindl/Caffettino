@@ -1,0 +1,26 @@
+// Test if we find the right type for `message` and `println`
+import java.util.Collections
+import java.util.List
+import java.lang.System
+import java.lang.Integer
+
+fn listOf1(element) {
+    return Collections.singletonList(element)
+}
+
+fn listOf(element1, element2) {
+    return List.of(element1, element2)
+}
+
+fn println(message) {
+    System.out.println(message)
+}
+
+let test = listOf("Oh", "hi")
+//let test = listOf1("Hi")
+//let test = listOf(Integer.valueOf(1), Integer.valueOf(2), Integer.valueOf(3))
+
+fn main() {
+    // println(test)
+    System.out.println(test.toString())
+}

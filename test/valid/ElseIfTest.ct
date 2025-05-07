@@ -1,0 +1,18 @@
+// Test parsing and branching else-if
+import java.lang.System
+
+let number = 0
+
+fn getMessage() {
+    if (number == 2) {
+        return "two"
+    } else if (number == 1) {
+        return "one"
+    } else {
+        return "other number"
+    }
+}
+
+fn main() {
+    System.out.println(getMessage())
+}

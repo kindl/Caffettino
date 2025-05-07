@@ -1,0 +1,8 @@
+// Test if we find the right type for `message` and `println`
+import java.lang.System
+
+let message = "Hello world"
+
+fn greet() {
+    System.out.println(message)
+}

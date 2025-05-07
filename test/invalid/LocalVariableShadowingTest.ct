@@ -1,0 +1,5 @@
+// Test variable shadowing error
+fn greet() {
+    let message = "Hi"
+    let message = "Wait a minute"
+}

@@ -1,0 +1,22 @@
+// Test rewrite of comparisons
+let f = 1.0f
+
+fn plus(a) {
+    return f + a
+}
+
+fn minus(a) {
+    return f - a
+}
+
+fn times(a) {
+    return f * a
+}
+
+fn div(a) {
+    return f / a
+}
+
+fn rem(a) {
+    return f % a
+}

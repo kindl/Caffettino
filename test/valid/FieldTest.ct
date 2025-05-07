@@ -1,0 +1,7 @@
+// This test is to figure out if we find the correct overload
+import java.lang.System
+
+fn greet() {
+    let message = "hi"
+    System.out.println(message)
+}

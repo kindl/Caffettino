@@ -1,0 +1,50 @@
+// Test rewrite of comparisons
+let f = 1.0f
+
+fn equal(a) {
+    if (f == a) {
+        return "True"
+    } else {
+        return "False"
+    }
+}
+
+fn notEqual(a) {
+    if (f != a) {
+        return "True"
+    } else {
+        return "False"
+    }
+}
+
+fn lesserOrEqual(a) {
+    if (f <= a) {
+        return "True"
+    } else {
+        return "False"
+    }
+}
+
+fn greaterOrEqual(a) {
+    if (f >= a) {
+        return "True"
+    } else {
+        return "False"
+    }
+}
+
+fn greater(a) {
+    if (f > a) {
+        return "True"
+    } else {
+        return "False"
+    }
+}
+
+fn lesser(a) {
+    if (f < a) {
+        return "True"
+    } else {
+        return "False"
+    }
+}

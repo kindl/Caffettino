@@ -1,0 +1,6 @@
+// This test is to figure out if we find the correct overload
+import java.lang.System
+
+fn greetWith(message) {
+    System.out.println(message)
+}

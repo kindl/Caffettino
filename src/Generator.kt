@@ -1,14 +1,12 @@
 import java.lang.classfile.*
 import java.lang.constant.*
 import java.lang.reflect.AccessFlag
-import java.nio.file.Files
-import java.nio.file.Paths
 
 
 data class Context(val codeBuilder: CodeBuilder)
 
 
-fun writeClassFile(name: String, expressions: List<Expression>) {
+fun generateClassFile(name: String, expressions: List<Expression>): ByteArray {
     val classDescriptor = ClassDesc.of(name)
     val bytes = ClassFile.of().build(classDescriptor) { classBuilder ->
         generateEmptyConstructor(classBuilder)
@@ -16,7 +14,7 @@ fun writeClassFile(name: String, expressions: List<Expression>) {
         generateFile(classBuilder, expressions)
     }
 
-    Files.write(Paths.get(name + ".class"), bytes)
+    return bytes
 }
 
 fun generateFile(classBuilder: ClassBuilder, expressions: List<Expression>) {
@@ -374,8 +372,8 @@ fun generateDot(context: Context, dot: Expression.Dot) {
     val fieldType = getClassDescriptor(dot.name.type)
     val ownerType = readType(dot.expression)
     val ownerTypeDescriptor = getClassDescriptor(ownerType)
+    generateExpression(context, dot.expression)
     if (isVirtual(dot)) {
-        generateExpression(context, dot.expression)
         context.codeBuilder.getfield(ownerTypeDescriptor, dot.name.identifier, fieldType)
     } else {
         context.codeBuilder.getstatic(ownerTypeDescriptor, dot.name.identifier, fieldType)

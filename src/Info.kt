@@ -10,6 +10,7 @@ val unsetInfo = Info.Outside(Unit)
 fun annotateFile(file: String, expressions: List<Expression>): List<Expression> {
     val current = Type.Concrete(file)
     val statics = gatherStatics(expressions)
+    errorOnDuplicates(statics)
 
     return expressions.map { expression ->
         when (expression) {
@@ -17,6 +18,14 @@ fun annotateFile(file: String, expressions: List<Expression>): List<Expression> 
             is Expression.Let -> annotateLocals(expression, listOf(), statics, current)
             is Expression.Import -> expression
             else -> error("Unexpected expression at top level " + expression)
+        }
+    }
+}
+
+fun <T> errorOnDuplicates(list: List<T>) {
+    for (group in list.groupBy({ it })) {
+        if (group.value.count() > 1) {
+            error("The variable " + group.key + " was declared multiple times ")
         }
     }
 }
@@ -30,6 +39,7 @@ fun annotateLocalsFunction(function: Expression.Function, statics: List<Name>, c
     }
 
     val locals = function.parameters + gatherLocals(function.body)
+    errorOnDuplicates(locals + statics)
     val annotated = function.body.map { annotateLocals(it, locals, statics, current) }
     return Expression.Function(function.name, parameters, annotated, function.annotations)
 }

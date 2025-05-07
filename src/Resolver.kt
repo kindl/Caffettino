@@ -223,7 +223,7 @@ fun getMethodType(type: Type, accessor: String, argumentTypes: List<Type>): Type
     // TODO read pseudo class file instead of specifying all those primitive calls in code
     if (isPrimitive(type)) {
         return when (accessor) {
-            "plus", "minus" -> Type.Arrow(type, listOf(type))
+            "plus", "minus", "times", "div", "rem" -> Type.Arrow(type, listOf(type))
             "equals" -> Type.Arrow(Type.Concrete("bool"), listOf(type))
             "notEqual" -> Type.Arrow(Type.Concrete("bool"), listOf(type))
             "not" -> Type.Arrow(Type.Concrete("bool"), listOf())

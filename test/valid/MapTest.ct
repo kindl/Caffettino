@@ -1,0 +1,21 @@
+// Tests invokedynamic
+import java.lang.System
+import java.util.List
+import java.lang.Integer
+
+fn listOf(a, b, c) {
+    return List.of(a, b, c)
+}
+
+fn println(a) {
+    System.out.println(a)
+}
+
+fn toString(a) {
+    return a.toString()
+}
+
+fn main() {
+    let l = listOf(Integer.valueOf(1), Integer.valueOf(2), Integer.valueOf(3))
+    l.stream().map(toString).forEach(println)
+}

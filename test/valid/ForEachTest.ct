@@ -1,0 +1,16 @@
+// Tests invokedynamic
+import java.lang.System
+import java.util.List
+
+fn listOf(a, b) {
+    return List.of(a, b)
+}
+
+fn println(a) {
+    System.out.println(a)
+}
+
+fn main() {
+    let l = listOf("hi", "there")
+    l.forEach(println)
+}

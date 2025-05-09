@@ -43,7 +43,7 @@ class TestRun {
                     generate(out, file.nameWithoutExtension, parsed)
                 } catch (exception: Exception) {
                     println("Successfully errored with message " + exception.message)
-                    return
+                    continue
                 }
 
                 error("File " + file.nameWithoutExtension + " was supposed to fail.")

@@ -141,10 +141,12 @@ fun <T> braces(p: Parser<Collection<Token>, T>): Parser<Collection<Token>, T> {
 val expr: Parser<Collection<Token>, Expression> = defer { orExpression }
 
 val callFn: Parser<Collection<Token>, (Expression) -> Expression> =
-    map({ arguments -> { e: Expression -> Expression.Call(e, arguments) } }, parens(sepByTrailing(expr, token(","))))
+    map({ arguments -> { e: Expression -> Expression.Call(e, arguments) } },
+        parens(sepByTrailing(expr, token(","))))
 
 val dotFn: Parser<Collection<Token>, (Expression) -> Expression> =
-    map({ name -> { e: Expression -> Expression.Dot(e, name) } }, second(token("."), name))
+    map({ name -> { e: Expression -> Expression.Dot(e, name) } },
+        second(token("."), name))
 
 val templateStringLiteralPart: Parser<Collection<Token>, Expression> = mapNullableNext {
     when (it) {

@@ -200,16 +200,49 @@ fun generateVariableCall(context: Context, variable: Expression.Variable, argume
     context.codeBuilder.invokestatic(ownerTypeDescriptor, variable.name.identifier, methodTypeDescriptor)
 }
 
+fun getBootstrapMethod(): DirectMethodHandleDesc {
+    val path = "java/lang/invoke/LambdaMetafactory"
+    val lambdaMetafactoryDesc = ClassDesc.ofInternalName(path)
+    val metafactoryName = "metafactory"
+    val metafactoryTypeDescriptor =
+        "(Ljava/lang/invoke/MethodHandles\$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodHandle;Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/CallSite;"
+    val metafactoryType = MethodTypeDesc.ofDescriptor(metafactoryTypeDescriptor)
+    val metafactoryKind = DirectMethodHandleDesc.Kind.STATIC
+    val bootstrapMethod = MethodHandleDesc.ofMethod(metafactoryKind, lambdaMetafactoryDesc, metafactoryName, metafactoryType)
+    return bootstrapMethod
+}
+
 fun generateDotCall(context: Context, dot: Expression.Dot, arguments: List<Expression>) {
-    val methodTypeDescriptor = getMethodTypeDescriptor(dot.name)
     val ownerType = readType(dot.expression)
-    val ownerTypeDescriptor = getClassDescriptor(ownerType)
+
+    if (dot.name.identifier == "toConsumer" && dot.expression is Expression.Variable) {
+        val methodHandleName = dot.expression.name.identifier
+        val methodHandleOwnerType = (dot.expression.info as Info.Static).ownerType
+        val methodHandleOwnerTypeDescriptor = getClassDescriptor(methodHandleOwnerType)
+        val methodHandleTypeDescriptor = getMethodTypeDescriptor(dot.expression.name)
+
+        //TODO interface static
+        val kind = DirectMethodHandleDesc.Kind.STATIC
+        val methodHandleDesc = MethodHandleDesc.ofMethod(kind,methodHandleOwnerTypeDescriptor, methodHandleName, methodHandleTypeDescriptor)
+
+        val invocationName = "accept"
+        val invocationType = MethodTypeDesc.of(ClassDesc.ofInternalName("java/util/function/Consumer"))
+        val acceptType = MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_Object)
+
+        val bootstrapMethod = getBootstrapMethod()
+        val dynamicDesc = DynamicCallSiteDesc.of(bootstrapMethod, invocationName, invocationType, acceptType, methodHandleDesc, methodHandleTypeDescriptor)
+        context.codeBuilder.invokedynamic(dynamicDesc)
+
+        return
+    }
 
     generateExpression(context, dot.expression)
-
     for (expression in arguments) {
         generateExpression(context, expression)
     }
+
+    val methodTypeDescriptor = getMethodTypeDescriptor(dot.name)
+    val ownerTypeDescriptor = getClassDescriptor(ownerType)
 
     // TODO invokedynamic
     // research how to build DynamicCallSiteDesc

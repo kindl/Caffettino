@@ -86,19 +86,26 @@ fun resolveIf(ifExpression: Expression.If, environment: Environment): Expression
 }
 
 fun resolveCall(call: Expression.Call, environment: Environment): Expression.Call {
-    val resolvedArguments = call.arguments.map { resolveExpression(it, environment) }
-
     return when (call.function) {
-        is Expression.Dot -> resolveDotCall(call.function, environment, resolvedArguments)
-        is Expression.Variable -> resolveVariableCall(call.function, environment, resolvedArguments)
-        else -> error("Non call " + call.function + " in call")
+        // The arguments are passed as parameter, because some functions, like comparison operators,
+        // need the arguments for rewriting
+        is Expression.Dot -> resolveDotCall(call.function, call.arguments, environment)
+        is Expression.Variable -> resolveVariableCall(call.function, call.arguments, environment)
+        else -> error("Cannot call " + call.function + " because it is not a function")
     }
 }
 
 fun readType(expression: Expression): Type {
     return when (expression) {
         is Expression.Lit -> readType(expression.literal)
-        is Expression.Call -> (readType(expression.function) as Type.Arrow).returnType
+        is Expression.Call -> {
+            val arrowType = readType(expression.function)
+            if (arrowType is Type.Arrow) {
+                return arrowType.returnType
+            } else {
+                error("The type of a call " + expression + " has to be an arrow type")
+            }
+        }
         is Expression.Dot -> expression.name.type
         is Expression.Variable -> expression.name.type
         else -> error("Cannot read type of expression " + expression)
@@ -116,18 +123,16 @@ fun readType(literal: Literal): Type {
     }
 }
 
-fun resolveVariableCall(
-    variable: Expression.Variable,
-    environment: Environment,
-    resolvedArguments: List<Expression>
-): Expression.Call {
+fun resolveVariableCall(variable: Expression.Variable, arguments: List<Expression>, environment: Environment): Expression.Call {
+    val resolvedArguments = arguments.map { resolveExpression(it, environment) }
+
     // TODO find overloads with resolved argument types
     val resolvedVariable = resolveVariable(variable, environment)
     val functionType = readType(resolvedVariable)
     val argumentTypes = resolvedArguments.map { readType(it) }
     if (functionType is Type.Arrow) {
         if (argumentTypes.count() != functionType.parameterTypes.count()) {
-            error("Parameters did not match " + argumentTypes + " " + functionType.parameterTypes)
+            error("Type of arguments " + argumentTypes + " did not match type of parameters " + functionType.parameterTypes)
         }
     }
 
@@ -137,11 +142,9 @@ fun resolveVariableCall(
 // TODO primitive calls in functions like
 // `fun eq(a) { return a == 2 }` or `fun pl(a) { a + 2 }`
 // should turn parameters into their primitive types
-fun resolveDotCall(
-    dot: Expression.Dot,
-    environment: Environment,
-    resolvedArguments: List<Expression>
-): Expression.Call {
+fun resolveDotCall(dot: Expression.Dot, arguments: List<Expression>, environment: Environment): Expression.Call {
+    val resolvedArguments = arguments.map { resolveExpression(it, environment) }
+
     val resolvedExpression = resolveExpression(dot.expression, environment)
     val leftType = readType(resolvedExpression)
 
@@ -222,18 +225,9 @@ fun resolveDot(dot: Expression.Dot, environment: Environment): Expression {
 fun getMethodType(type: Type, accessor: String, argumentTypes: List<Type>): Type {
     // TODO read pseudo class file instead of specifying all those primitive calls in code
     if (isPrimitive(type)) {
-        return when (accessor) {
-            "plus", "minus", "times", "div", "rem" -> Type.Arrow(type, listOf(type))
-            "equals" -> Type.Arrow(Type.Concrete("bool"), listOf(type))
-            "notEqual" -> Type.Arrow(Type.Concrete("bool"), listOf(type))
-            "not" -> Type.Arrow(Type.Concrete("bool"), listOf())
-            "compareTo" -> Type.Arrow(Type.Concrete("int"), listOf(type))
-            "lesserOrEqual" -> Type.Arrow(Type.Concrete("int"), listOf(type))
-            "lesser" -> Type.Arrow(Type.Concrete("int"), listOf(type))
-            "greaterOrEqual" -> Type.Arrow(Type.Concrete("int"), listOf(type))
-            "greater" -> Type.Arrow(Type.Concrete("int"), listOf(type))
-            else -> error("Can't find method type for primitive " + type + " " + accessor)
-        }
+        return getPrimitiveMethodType(type, accessor)
+    } else if (type is Type.Arrow) {
+        return getFunctionConversion(type, accessor)
     }
 
     val path = (type as Type.Concrete).name
@@ -251,6 +245,25 @@ fun getMethodType(type: Type, accessor: String, argumentTypes: List<Type>): Type
                     + overloads + " for owner "
                     + type
         )
+}
+
+fun getFunctionConversion(type: Type, accessor: String): Type {
+    return Type.Arrow(Type.Concrete("java/util/function/Consumer"), listOf())
+}
+
+fun getPrimitiveMethodType(type: Type, accessor: String): Type {
+    return when (accessor) {
+        "plus", "minus", "times", "div", "rem" -> Type.Arrow(type, listOf(type))
+        "equals" -> Type.Arrow(Type.Concrete("bool"), listOf(type))
+        "notEqual" -> Type.Arrow(Type.Concrete("bool"), listOf(type))
+        "not" -> Type.Arrow(Type.Concrete("bool"), listOf())
+        "compareTo" -> Type.Arrow(Type.Concrete("int"), listOf(type))
+        "lesserOrEqual" -> Type.Arrow(Type.Concrete("int"), listOf(type))
+        "lesser" -> Type.Arrow(Type.Concrete("int"), listOf(type))
+        "greaterOrEqual" -> Type.Arrow(Type.Concrete("int"), listOf(type))
+        "greater" -> Type.Arrow(Type.Concrete("int"), listOf(type))
+        else -> error("Can't find method type for primitive " + type + " " + accessor)
+    }
 }
 
 fun zipAccepts(parameterTypes: List<Type>, argumentTypes: List<Type>): Boolean {
@@ -296,16 +309,14 @@ fun getMethods(classModel: ClassModel): List<MethodModel> {
 // public fields should be modeled with a getter
 // so instead of someObject.publicField, it should become someObject.publicField() or someObject.getPublicField()
 fun getAccessorType(type: Type, accessor: String): Type {
-    val name = (type as Type.Concrete).name
-    val path = if (name == "Any") {
-        "java/lang/Object"
-    } else {
-        name
-    }
-
+    val path = (type as Type.Concrete).name
     val classFile = getClassFile(path)
     val options = classFile.fields().filter {
         it.flags().has(AccessFlag.STATIC) && it.fieldName().stringValue() == accessor
+    }
+
+    if (!options.any()) {
+        error("No options for " + accessor + " and type " + type)
     }
 
     val stringValue = options.first().fieldType().stringValue()

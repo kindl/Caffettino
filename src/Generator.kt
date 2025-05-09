@@ -213,46 +213,15 @@ fun getBootstrapMethod(): DirectMethodHandleDesc {
 }
 
 fun generateDotCall(context: Context, dot: Expression.Dot, arguments: List<Expression>) {
-    val ownerType = readType(dot.expression)
-
-    if (dot.name.identifier == "toConsumer" && dot.expression is Expression.Variable) {
-        val methodHandleName = dot.expression.name.identifier
-        val methodHandleOwnerType = (dot.expression.info as Info.Static).ownerType
-        val methodHandleOwnerTypeDescriptor = getClassDescriptor(methodHandleOwnerType)
-        val methodHandleTypeDescriptor = getMethodTypeDescriptor(dot.expression.name)
-
-        //TODO interface static
-        val kind = DirectMethodHandleDesc.Kind.STATIC
-        val methodHandleDesc = MethodHandleDesc.ofMethod(kind,methodHandleOwnerTypeDescriptor, methodHandleName, methodHandleTypeDescriptor)
-
-        val invocationName = "accept"
-        val invocationType = MethodTypeDesc.of(ClassDesc.ofInternalName("java/util/function/Consumer"))
-        val acceptType = MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_Object)
-
-        val bootstrapMethod = getBootstrapMethod()
-        val dynamicDesc = DynamicCallSiteDesc.of(bootstrapMethod, invocationName, invocationType, acceptType, methodHandleDesc, methodHandleTypeDescriptor)
-        context.codeBuilder.invokedynamic(dynamicDesc)
-
-        return
-    }
-
     generateExpression(context, dot.expression)
     for (expression in arguments) {
         generateExpression(context, expression)
     }
 
     val methodTypeDescriptor = getMethodTypeDescriptor(dot.name)
+    val ownerType = readType(dot.expression)
     val ownerTypeDescriptor = getClassDescriptor(ownerType)
 
-    // TODO invokedynamic
-    // research how to build DynamicCallSiteDesc
-    // calls like list.forEach({ println(it) })
-    // are translated into a static method
-    // fn someLambda(it) { println(it) }
-    // and the forEach path becomes
-    // loadlocal
-    // InvokeDynamic with some function info on someLambda
-    // invokevirtual forEach
     if (isPrimitive(ownerType)) {
         generatePrimitiveCall(context, ownerTypeDescriptor, dot.name.identifier)
     } else if (isVirtual(dot)) {
@@ -387,11 +356,14 @@ fun generateVariable(context: Context, variable: Expression.Variable) {
             context.codeBuilder.loadLocal(typeKind, variable.info.index)
         }
 
-        is Info.Static -> {
+        is Info.Static -> if (variable.name.type is Type.Concrete) {
             val fieldType = getClassDescriptor(variable.name.type)
             val ownerType = variable.info.ownerType
             val ownerTypeDescriptor = getClassDescriptor(ownerType)
             context.codeBuilder.getstatic(ownerTypeDescriptor, variable.name.identifier, fieldType)
+        } else {
+            generateFunctionVariable(context, variable)
+            // error("Cannot generate variable " + variable)
         }
 
         is Info.Outside -> {
@@ -399,6 +371,44 @@ fun generateVariable(context: Context, variable: Expression.Variable) {
             // for example for System.out, System does not need to be generated
         }
     }
+}
+
+fun generateFunctionVariable(context: Context, variable: Expression.Variable) {
+    val methodHandleName = variable.name.identifier
+    val methodHandleOwnerType = (variable.info as Info.Static).ownerType
+    val methodHandleOwnerTypeDescriptor = getClassDescriptor(methodHandleOwnerType)
+    val methodHandleTypeDescriptor = getMethodTypeDescriptor(variable.name)
+
+    //TODO interface static
+    val kind = DirectMethodHandleDesc.Kind.STATIC
+    val methodHandleDesc =
+        MethodHandleDesc.ofMethod(kind, methodHandleOwnerTypeDescriptor, methodHandleName, methodHandleTypeDescriptor)
+
+    val bootstrapMethod = getBootstrapMethod()
+
+    // TODO better way to find out what type of interface is used
+    val returnType = (variable.name.type as Type.Arrow).returnType
+    val parameterTypes = (variable.name.type as Type.Arrow).parameterTypes
+
+    val (invocationName, invocationType, functionType) = if (returnType == Type.Concrete("void") && parameterTypes.count() == 1) {
+        val invocationName = "accept"
+        val invocationType = MethodTypeDesc.of(ClassDesc.ofInternalName("java/util/function/Consumer"))
+        val functionType = MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_Object)
+        Triple(invocationName, invocationType, functionType)
+    } else if (returnType == Type.Concrete("bool") && parameterTypes.count() == 1) {
+        val invocationName = "test"
+        val invocationType = MethodTypeDesc.of(ClassDesc.ofInternalName("java/util/function/Predicate"))
+        val functionType = MethodTypeDesc.of(ConstantDescs.CD_Boolean, ConstantDescs.CD_Object)
+        Triple(invocationName, invocationType, functionType)
+    } else {
+        val invocationName = "apply"
+        val invocationType = MethodTypeDesc.of(ClassDesc.ofInternalName("java/util/function/Function"))
+        val functionType = MethodTypeDesc.of(ConstantDescs.CD_Object, ConstantDescs.CD_Object)
+        Triple(invocationName, invocationType, functionType)
+    }
+
+    val dynamicDesc = DynamicCallSiteDesc.of(bootstrapMethod, invocationName, invocationType, functionType, methodHandleDesc, methodHandleTypeDescriptor)
+    context.codeBuilder.invokedynamic(dynamicDesc)
 }
 
 fun generateDot(context: Context, dot: Expression.Dot) {

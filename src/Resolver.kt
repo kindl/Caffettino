@@ -226,8 +226,6 @@ fun getMethodType(type: Type, accessor: String, argumentTypes: List<Type>): Type
     // TODO read pseudo class file instead of specifying all those primitive calls in code
     if (isPrimitive(type)) {
         return getPrimitiveMethodType(type, accessor)
-    } else if (type is Type.Arrow) {
-        return getFunctionConversion(type, accessor)
     }
 
     val path = (type as Type.Concrete).name
@@ -245,10 +243,6 @@ fun getMethodType(type: Type, accessor: String, argumentTypes: List<Type>): Type
                     + overloads + " for owner "
                     + type
         )
-}
-
-fun getFunctionConversion(type: Type, accessor: String): Type {
-    return Type.Arrow(Type.Concrete("java/util/function/Consumer"), listOf())
 }
 
 fun getPrimitiveMethodType(type: Type, accessor: String): Type {
@@ -275,7 +269,14 @@ fun zipAccepts(parameterTypes: List<Type>, argumentTypes: List<Type>): Boolean {
 // then it accepts any reference parameter
 fun accepts(parameterType: Type, argumentType: Type): Boolean {
     return parameterType == argumentType
-            || (!isPrimitive(argumentType) && parameterType == any)
+        || (!isPrimitive(argumentType) && parameterType == any)
+        || (argumentType is Type.Arrow && isFunctionInterface(parameterType))
+}
+
+fun isFunctionInterface(parameterType: Type): Boolean {
+    return parameterType == Type.Concrete("java/util/function/Consumer")
+        || parameterType == Type.Concrete("java/util/function/Function")
+        || parameterType == Type.Concrete("java/util/function/Predicate")
 }
 
 fun getClassFile(path: String): ClassModel {

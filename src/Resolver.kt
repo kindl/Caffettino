@@ -1,6 +1,8 @@
 import java.lang.classfile.*
+import java.lang.constant.ConstantDescs
 import java.lang.reflect.AccessFlag
-
+import java.nio.file.Files
+import java.nio.file.Paths
 
 data class Environment(val types: Map<String, Type>)
 
@@ -12,9 +14,13 @@ fun Environment.add(key: String, value: Type): Environment {
     return Environment(this.types + Pair(key, value))
 }
 
+val baseEnvironment = mapOf(
+    Pair("string", stringType),
+    Pair("Parameters", Type.Concrete("Parameters"))
+)
 
 fun resolveFile(expressions: List<Expression>): List<Expression> {
-    var environment = Environment(mapOf<String, Type>())
+    var environment = Environment(baseEnvironment)
 
     return expressions.map { expression ->
         when (expression) {
@@ -123,15 +129,29 @@ fun readType(literal: Literal): Type {
     }
 }
 
+fun resolveConstructor(variable: Expression.Variable, types: List<Type>, environment: Environment): Expression.Variable {
+    val type = environment.types[variable.name.identifier] ?: error("Not found " + variable.name.identifier)
+    val initType = getInitType(type, types)
+    // the constructor has return type void, but here we treat it as returning the object
+    val constructorType = Type.Arrow(type, initType.parameterTypes)
+    return Expression.Variable(Name(variable.name.identifier, constructorType), variable.info)
+}
+
 fun resolveVariableCall(variable: Expression.Variable, arguments: List<Expression>, environment: Environment): Expression.Call {
     val resolvedArguments = arguments.map { resolveExpression(it, environment) }
+    val argumentTypes = resolvedArguments.map { readType(it) }
 
     // TODO find overloads with resolved argument types
-    val resolvedVariable = resolveVariable(variable, environment)
+    val resolvedVariable = if (variable.info is Info.Outside) {
+        resolveConstructor(variable, argumentTypes, environment)
+    } else {
+        resolveVariable(variable, environment)
+    }
+
     val functionType = readType(resolvedVariable)
-    val argumentTypes = resolvedArguments.map { readType(it) }
+
     if (functionType is Type.Arrow) {
-        if (argumentTypes.count() != functionType.parameterTypes.count()) {
+        if (!zipAccepts(functionType.parameterTypes, argumentTypes)) {
             error("Type of arguments " + argumentTypes + " did not match type of parameters " + functionType.parameterTypes)
         }
     }
@@ -222,7 +242,7 @@ fun resolveDot(dot: Expression.Dot, environment: Environment): Expression {
     return Expression.Dot(resolvedExpression, newName)
 }
 
-fun getMethodType(type: Type, accessor: String, argumentTypes: List<Type>): Type {
+fun getMethodType(type: Type, accessor: String, argumentTypes: List<Type>): Type.Arrow {
     // TODO read pseudo class file instead of specifying all those primitive calls in code
     if (isPrimitive(type)) {
         return getPrimitiveMethodType(type, accessor)
@@ -245,7 +265,11 @@ fun getMethodType(type: Type, accessor: String, argumentTypes: List<Type>): Type
         )
 }
 
-fun getPrimitiveMethodType(type: Type, accessor: String): Type {
+fun getInitType(type: Type, argumentTypes: List<Type>): Type.Arrow {
+    return getMethodType(type, ConstantDescs.INIT_NAME, argumentTypes)
+}
+
+fun getPrimitiveMethodType(type: Type, accessor: String): Type.Arrow {
     return when (accessor) {
         "plus", "minus", "times", "div", "rem" -> Type.Arrow(type, listOf(type))
         "equals" -> Type.Arrow(Type.Concrete("bool"), listOf(type))
@@ -271,29 +295,28 @@ fun accepts(parameterType: Type, argumentType: Type): Boolean {
     return parameterType == argumentType
         || (!isPrimitive(argumentType) && parameterType == any)
         || (argumentType is Type.Arrow && isFunctionInterface(parameterType))
-}
-
-fun isFunctionInterface(parameterType: Type): Boolean {
-    return parameterType == Type.Concrete("java/util/function/Consumer")
-        || parameterType == Type.Concrete("java/util/function/Function")
-        || parameterType == Type.Concrete("java/util/function/Predicate")
+        || (isArrayType(argumentType) && parameterType == arrayOfAny)
 }
 
 fun getClassFile(path: String): ClassModel {
     // TODO find class by path, and allow non-system imports like import kotlin.io.Console
-    val stream = if (path == "Any") {
-        ClassLoader.getSystemResourceAsStream("java/lang/Object.class")
+    val bytes = if (path == "Any") {
+        ClassLoader.getSystemResourceAsStream("java/lang/Object.class")?.readAllBytes()
     } else if (path == "string") {
-        ClassLoader.getSystemResourceAsStream("java/lang/String.class")
+        ClassLoader.getSystemResourceAsStream("java/lang/String.class")?.readAllBytes()
     } else if (path.startsWith("java/")) {
-        ClassLoader.getSystemResourceAsStream(path + ".class")
+        ClassLoader.getSystemResourceAsStream(path + ".class")?.readAllBytes()
     } else if (path.startsWith("kotlin/")) {
-        Any::class.java.getResourceAsStream(path + ".class")
+        Any::class.java.getResourceAsStream(path + ".class")?.readAllBytes()
     } else {
-        error("Path not searchable " + path)
+        Files.readAllBytes(Paths.get(path + ".class"))
     }
 
-    val classFile = ClassFile.of().parse(stream.readAllBytes())
+    if (bytes == null) {
+        error("Cannot open path " + path)
+    }
+
+    val classFile = ClassFile.of().parse(bytes)
     return classFile
 }
 
@@ -369,13 +392,30 @@ fun getReturnType(expressions: List<Expression>): Type? {
 }
 
 fun resolveAnnotation(expression: Expression, environment: Environment): Expression {
+    if (expression is Expression.Call && isTypeAnnotation(expression)) {
+        return Expression.Call(expression.function, expression.arguments.map { resolveAnnotation(it, environment) })
+    }
+
     return resolveExpression(expression, environment)
+}
+
+fun isTypeAnnotation(expression: Expression): Boolean {
+    return (expression is Expression.Call
+        && expression.function is Expression.Variable
+        && expression.function.name.identifier == "Parameters")
 }
 
 fun resolveFunction(function: Expression.Function, environment: Environment): Expression.Function {
     val resolvedAnnotations = function.annotations.map { resolveAnnotation(it, environment) }
 
-    val parameters = function.parameters
+    val typeAnnotation = resolvedAnnotations.firstOrNull { isTypeAnnotation(it) }
+    val parameters = if (typeAnnotation != null) {
+        val types = (typeAnnotation as Expression.Call).arguments.map { readType(it) }
+        function.parameters.zip(types, { left, right -> Name(left.identifier, right) })
+    } else {
+        function.parameters
+    }
+
     // TODO recursion
     // val returnType = any
     // val functionType = Type.Arrow(returnType, parameterPairs.map { it.second })

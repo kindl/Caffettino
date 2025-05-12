@@ -4,7 +4,18 @@ sealed class Type {
 }
 
 val any = Type.Concrete("Any")
+val arrayOfAny = Type.Concrete("[Any]")
 val stringType = Type.Concrete("string")
+
+fun isArrayType(type: Type): Boolean {
+    return type is Type.Concrete && type.name.startsWith("[")
+}
+
+fun isFunctionInterface(parameterType: Type): Boolean {
+    return parameterType == Type.Concrete("java/util/function/Consumer")
+        || parameterType == Type.Concrete("java/util/function/Function")
+        || parameterType == Type.Concrete("java/util/function/Predicate")
+}
 
 fun makeConcrete(path: String): Type.Concrete {
     return when (path) {
@@ -28,7 +39,7 @@ val parseL = map3(
 )
 
 val parseT = choice(listOf(parseI, parseJ, parseV, parseZ, parseB, parseC, parseF, parseD, parseL))
-val parseA = map({ Type.Concrete("[" + it + "]") }, second(takeString("["), parseT))
+val parseA = map({ Type.Concrete("[" + it.name + "]") }, second(takeString("["), parseT))
 var parseK = or(parseA, parseT)
 
 val parseM = map2(

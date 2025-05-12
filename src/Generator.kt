@@ -92,7 +92,7 @@ fun generateStaticFieldAssignment(context: Context, let: Expression.Let) {
 
 fun generateFunction(classBuilder: ClassBuilder, function: Expression.Function) {
     val name = function.name.identifier
-    val methodTypeDescriptor = getMethodTypeDescriptor(function.name)
+    val methodTypeDescriptor = getMethodTypeDescriptor(function.name.type)
     val returnType = (function.name.type as Type.Arrow).returnType
     val flags = ClassFile.ACC_PUBLIC + ClassFile.ACC_STATIC
     classBuilder.withMethod(name, methodTypeDescriptor, flags) { methodBuilder ->
@@ -185,7 +185,25 @@ fun generateCall(context: Context, call: Expression.Call) {
 }
 
 fun generateVariableCall(context: Context, variable: Expression.Variable, arguments: List<Expression>) {
-    val methodTypeDescriptor = getMethodTypeDescriptor(variable.name)
+    val methodTypeDescriptor = getMethodTypeDescriptor(variable.name.type)
+
+    // Constructor
+    if (variable.info is Info.Outside) {
+        val constructorType = readType(variable) as Type.Arrow
+        val initType = Type.Arrow(Type.Concrete("void"), constructorType.parameterTypes)
+        val returnType = constructorType.returnType
+
+        val returnClassDesc = getClassDescriptor(returnType)
+        val initMethodTypeDesc = getMethodTypeDescriptor(initType)
+        context.codeBuilder.new_(returnClassDesc)
+        context.codeBuilder.dup()
+        for (expression in arguments) {
+            generateExpression(context, expression)
+        }
+
+        context.codeBuilder.invokespecial(returnClassDesc, ConstantDescs.INIT_NAME, initMethodTypeDesc)
+        return
+    }
 
     // TODO imported functions
     // Here we basically assume, that calling a function always has the current class as owner
@@ -218,7 +236,7 @@ fun generateDotCall(context: Context, dot: Expression.Dot, arguments: List<Expre
         generateExpression(context, expression)
     }
 
-    val methodTypeDescriptor = getMethodTypeDescriptor(dot.name)
+    val methodTypeDescriptor = getMethodTypeDescriptor(dot.name.type)
     val ownerType = readType(dot.expression)
     val ownerTypeDescriptor = getClassDescriptor(ownerType)
 
@@ -377,7 +395,7 @@ fun generateFunctionVariable(context: Context, variable: Expression.Variable) {
     val methodHandleName = variable.name.identifier
     val methodHandleOwnerType = (variable.info as Info.Static).ownerType
     val methodHandleOwnerTypeDescriptor = getClassDescriptor(methodHandleOwnerType)
-    val methodHandleTypeDescriptor = getMethodTypeDescriptor(variable.name)
+    val methodHandleTypeDescriptor = getMethodTypeDescriptor(variable.name.type)
 
     //TODO interface static
     val kind = DirectMethodHandleDesc.Kind.STATIC
@@ -394,6 +412,11 @@ fun generateFunctionVariable(context: Context, variable: Expression.Variable) {
         val invocationName = "accept"
         val invocationType = MethodTypeDesc.of(ClassDesc.ofInternalName("java/util/function/Consumer"))
         val functionType = MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_Object)
+        Triple(invocationName, invocationType, functionType)
+    } else if (returnType == Type.Concrete("void") && parameterTypes.count() == 0) {
+        val invocationName = "run"
+        val invocationType = MethodTypeDesc.of(ClassDesc.ofInternalName("java/util/function/Runnable"))
+        val functionType = MethodTypeDesc.of(ConstantDescs.CD_void)
         Triple(invocationName, invocationType, functionType)
     } else if (returnType == Type.Concrete("bool") && parameterTypes.count() == 1) {
         val invocationName = "test"
@@ -439,9 +462,8 @@ fun getClassDescriptor(type: Type): ClassDesc {
             "Any" -> ConstantDescs.CD_Object
             else ->
                 if (type.name.startsWith("[") && type.name.endsWith("]")) {
-                    // TODO handle arrays recursively
                     val innerName = type.name.substring(1, type.name.length - 1)
-                    ClassDesc.ofInternalName(innerName).arrayType()
+                    getClassDescriptor(Type.Concrete(innerName)).arrayType()
                 } else {
                     // ofInternalName works on names with slashes
                     ClassDesc.ofInternalName(type.name)
@@ -478,13 +500,13 @@ fun isVirtual(dot: Expression.Dot): Boolean {
     }
 }
 
-fun getMethodTypeDescriptor(name: Name): MethodTypeDesc {
-    return when (name.type) {
+fun getMethodTypeDescriptor(type: Type): MethodTypeDesc {
+    return when (type) {
         is Type.Arrow -> MethodTypeDesc.of(
-            getClassDescriptor(name.type.returnType),
-            name.type.parameterTypes.map { getClassDescriptor(it) })
+            getClassDescriptor(type.returnType),
+            type.parameterTypes.map { getClassDescriptor(it) })
 
-        is Type.Concrete -> error("Unexpected type " + name.type.name + " for function " + name.identifier)
+        is Type.Concrete -> error("Unexpected type " + type.name)
     }
 }
 

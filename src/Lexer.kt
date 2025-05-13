@@ -18,12 +18,32 @@ fun isSignificant(t: Token): Boolean {
     return !(t is Token.WhitespaceToken || t is Token.CommentToken)
 }
 
-// TODO escape sequences like \n
+val escapeSeq =
+    map({ toEscapeSeq(it.toString() ) }, second(satisfyChar { it == '\\' }, satisfyChar { "nrt\"\\{".contains(it) }))
+
+val stringChar =
+    map({ it.joinToString("") }, many(or(escapeSeq,takeWhile1 { it != '\"' })))
+
+val templateStringChar =
+    map({ it.joinToString("") }, many(or(escapeSeq,takeWhile1 { it != '\"' && it != '{' })))
+
+fun toEscapeSeq(seq: String): String {
+    return when (seq) {
+        "\\" -> "\\"
+        "\"" -> "\""
+        "{" -> "{"
+        "n" -> "\n"
+        "r" -> "\r"
+        "t" -> "\t"
+        else -> error("Cannot escape " + seq)
+    }
+}
+
 val stringToken: Parser<String, Token> =
     map3(
         { _, s, _ -> Token.StringToken(s) },
         satisfyChar { it == '\"' },
-        takeWhile { it != '\"' },
+        stringChar,
         satisfyChar { it == '\"' })
 
 val expressionPart =
@@ -36,7 +56,7 @@ val templateStringEnd =
     replace(Token.TemplateStringEndToken(""), satisfyChar { it == '\"' })
 
 val templateStringPart: Parser<String, Token> =
-    map({ Token.TemplateStringPartToken(it) }, takeWhile { it != '\"' && it != '{' })
+    map({ Token.TemplateStringPartToken(it) }, templateStringChar)
 
 val templateString: Parser<String, List<Token>> =
     map4(

@@ -155,15 +155,21 @@ val templateStringLiteralPart: Parser<Collection<Token>, Expression> = mapNullab
     }
 }
 
-// Wraps expression inside a template string with a toString call
-val expressionWithToString: Parser<Collection<Token>, Expression> =
-    map({ Expression.Call(Expression.Dot(it, Name("toString", any)), listOf()) }, expr)
+fun makeStringConversion(expression: Expression): Expression {
+    val stringClass = Name("string",  any)
+    val valueOf = Name("valueOf", any)
+    return Expression.Call(Expression.Dot(Expression.Variable(stringClass, unsetInfo), valueOf), listOf(expression))
+}
+
+// Wraps expression inside a template string with a String.valueOf call
+val expressionWithStringConversion: Parser<Collection<Token>, Expression> =
+    map(::makeStringConversion, expr)
 
 val templateStringLiteral: Parser<Collection<Token>, Expression> =
     map3(
         { _, parts, _ -> parts.reduce { a, b -> makeConcat(a, b) } },
         satisfy { it is Token.TemplateStringBeginToken },
-        many(or(templateStringLiteralPart, expressionWithToString)),
+        many(or(templateStringLiteralPart, expressionWithStringConversion)),
         satisfy { it is Token.TemplateStringEndToken })
 
 val literal = choice(listOf(templateStringLiteral, booleanLiteral, stringLiteral, numberLiteral))

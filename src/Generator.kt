@@ -215,6 +215,16 @@ fun generateVariableCall(context: Context, variable: Expression.Variable, argume
         generateExpression(context, expression)
     }
 
+    if (variable.name.identifier == "emptyArray") {
+        val returnType = (variable.name.type as Type.Arrow).returnType
+        val componentTypeName = (returnType as Type.Concrete).name
+        val componentType = Type.Concrete(componentTypeName.substring(1, componentTypeName.length - 1))
+        val componentTypeDesc = getClassDescriptor(componentType)
+        context.codeBuilder.iconst_0()
+        context.codeBuilder.anewarray(componentTypeDesc)
+        return
+    }
+
     context.codeBuilder.invokestatic(ownerTypeDescriptor, variable.name.identifier, methodTypeDescriptor)
 }
 
@@ -232,13 +242,29 @@ fun getBootstrapMethod(): DirectMethodHandleDesc {
 
 fun generateDotCall(context: Context, dot: Expression.Dot, arguments: List<Expression>) {
     generateExpression(context, dot.expression)
-    for (expression in arguments) {
-        generateExpression(context, expression)
-    }
 
     val methodTypeDescriptor = getMethodTypeDescriptor(dot.name.type)
     val ownerType = readType(dot.expression)
     val ownerTypeDescriptor = getClassDescriptor(ownerType)
+
+    // Special case for lazy operators
+    if (ownerType == Type.Concrete("bool")) {
+        if (dot.name.identifier == "and") {
+            context.codeBuilder.ifThenElse(
+                { generateExpression(Context(it), arguments.first()) },
+                { it.iconst_0() })
+            return
+        } else if (dot.name.identifier == "or") {
+            context.codeBuilder.ifThenElse(
+                { it.iconst_1() },
+                { generateExpression(Context(it), arguments.first()) })
+            return
+        }
+    }
+
+    for (expression in arguments) {
+        generateExpression(context, expression)
+    }
 
     if (isPrimitive(ownerType)) {
         generatePrimitiveCall(context, ownerTypeDescriptor, dot.name.identifier)
@@ -258,9 +284,7 @@ fun generateDotCall(context: Context, dot: Expression.Dot, arguments: List<Expre
 }
 
 
-// TODO doubles
 // TODO conversion functions
-// TODO logical functions
 fun generatePrimitiveCall(context: Context, ownerTypeDescriptor: ClassDesc, identifier: String) {
     if (ownerTypeDescriptor.descriptorString() == "I") {
         when (identifier) {

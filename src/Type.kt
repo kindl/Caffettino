@@ -5,6 +5,7 @@ sealed class Type {
 
 val any = Type.Concrete("Any")
 val arrayOfAny = Type.Concrete("[Any]")
+val emptyArrayType = Type.Concrete("EmptyArray")
 val stringType = Type.Concrete("string")
 
 fun isArrayType(type: Type): Boolean {

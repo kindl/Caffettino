@@ -6,10 +6,11 @@ sealed class Info {
 
 val unsetInfo = Info.Outside(Unit)
 
+val baseStatics = listOf(Name("emptyArray", any))
 
 fun annotateFile(file: String, expressions: List<Expression>): List<Expression> {
     val current = Type.Concrete(file)
-    val statics = gatherStatics(expressions)
+    val statics = baseStatics + gatherStatics(expressions)
     errorOnDuplicates(statics)
 
     return expressions.map { expression ->

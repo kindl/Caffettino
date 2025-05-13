@@ -16,7 +16,8 @@ fun Environment.add(key: String, value: Type): Environment {
 
 val baseEnvironment = mapOf(
     Pair("string", stringType),
-    Pair("Parameters", Type.Concrete("Parameters"))
+    Pair("Parameters", Type.Concrete("Parameters")),
+    Pair("emptyArray", Type.Arrow(Type.Concrete("EmptyArray"), listOf())),
 )
 
 fun resolveFile(expressions: List<Expression>): List<Expression> {
@@ -137,6 +138,15 @@ fun resolveConstructor(variable: Expression.Variable, types: List<Type>, environ
     return Expression.Variable(Name(variable.name.identifier, constructorType), variable.info)
 }
 
+fun emptyArrayWorkaround(expression: Expression, expectedType: Type): Expression {
+    if (expression is Expression.Call && expression.function is Expression.Variable && expression.function.name.identifier == "emptyArray") {
+        val name = Name(expression.function.name.identifier, Type.Arrow(expectedType, listOf()))
+        return Expression.Call(Expression.Variable(name, expression.function.info), expression.arguments)
+    }
+
+    return expression
+}
+
 fun resolveVariableCall(variable: Expression.Variable, arguments: List<Expression>, environment: Environment): Expression.Call {
     val resolvedArguments = arguments.map { resolveExpression(it, environment) }
     val argumentTypes = resolvedArguments.map { readType(it) }
@@ -150,13 +160,16 @@ fun resolveVariableCall(variable: Expression.Variable, arguments: List<Expressio
 
     val functionType = readType(resolvedVariable)
 
-    if (functionType is Type.Arrow) {
-        if (!zipAccepts(functionType.parameterTypes, argumentTypes)) {
-            error("Type of arguments " + argumentTypes + " did not match type of parameters " + functionType.parameterTypes)
-        }
+    if (functionType !is Type.Arrow) {
+        error("Type is not a function type")
     }
 
-    return Expression.Call(resolvedVariable, resolvedArguments)
+    if (!zipAccepts(functionType.parameterTypes, argumentTypes)) {
+        error("Type of arguments " + argumentTypes + " did not match type of parameters " + functionType.parameterTypes)
+    }
+
+    val fixedArguments = resolvedArguments.zip(functionType.parameterTypes, ::emptyArrayWorkaround)
+    return Expression.Call(resolvedVariable, fixedArguments)
 }
 
 // TODO primitive calls in functions like
@@ -181,9 +194,12 @@ fun resolveDotCall(dot: Expression.Dot, arguments: List<Expression>, environment
     }
 
     val argumentTypes = resolvedArguments.map { readType(it) }
-    val accessorType = getMethodType(leftType, dot.name.identifier, argumentTypes)
-    val newName = Name(dot.name.identifier, accessorType)
-    return Expression.Call(Expression.Dot(resolvedExpression, newName), resolvedArguments)
+    val functionType = getMethodType(leftType, dot.name.identifier, argumentTypes)
+    val newName = Name(dot.name.identifier, functionType)
+    val resolvedDot = Expression.Dot(resolvedExpression, newName)
+
+    val fixedArguments = resolvedArguments.zip(functionType.parameterTypes, ::emptyArrayWorkaround)
+    return Expression.Call(resolvedDot, fixedArguments)
 }
 
 // rewrite a.greaterOrEqual(b) to a.compareTo(b) >= 0
@@ -274,12 +290,13 @@ fun getPrimitiveMethodType(type: Type, accessor: String): Type.Arrow {
         "plus", "minus", "times", "div", "rem" -> Type.Arrow(type, listOf(type))
         "equals" -> Type.Arrow(Type.Concrete("bool"), listOf(type))
         "notEqual" -> Type.Arrow(Type.Concrete("bool"), listOf(type))
-        "not" -> Type.Arrow(Type.Concrete("bool"), listOf())
         "compareTo" -> Type.Arrow(Type.Concrete("int"), listOf(type))
         "lesserOrEqual" -> Type.Arrow(Type.Concrete("int"), listOf(type))
         "lesser" -> Type.Arrow(Type.Concrete("int"), listOf(type))
         "greaterOrEqual" -> Type.Arrow(Type.Concrete("int"), listOf(type))
         "greater" -> Type.Arrow(Type.Concrete("int"), listOf(type))
+        "not" -> Type.Arrow(Type.Concrete("bool"), listOf())
+        "and", "or" -> Type.Arrow(Type.Concrete("bool"), listOf(Type.Concrete("bool")))
         else -> error("Can't find method type for primitive " + type + " " + accessor)
     }
 }
@@ -296,6 +313,7 @@ fun accepts(parameterType: Type, argumentType: Type): Boolean {
         || (!isPrimitive(argumentType) && parameterType == any)
         || (argumentType is Type.Arrow && isFunctionInterface(parameterType))
         || (isArrayType(argumentType) && parameterType == arrayOfAny)
+        || (isArrayType(parameterType) && argumentType == emptyArrayType)
 }
 
 fun getClassFile(path: String): ClassModel {

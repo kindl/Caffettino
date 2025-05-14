@@ -1,10 +1,10 @@
 class Parser<Input, Output>(val run: (Input) -> Pair<Input, Output>?)
 
 
-fun <S, T, E> parseCompletely(p: Parser<S, T>, input: S): T? where S : Iterable<E> {
+fun <S, T, E> parseCompletely(p: Parser<S, T>, input: S): T where S : Iterable<E> {
     val result = p.run(input)
     if (result == null) {
-        return null
+        error("Could not begin parsing")
     } else {
         val (rest, output) = result
         val first = rest.firstOrNull()
@@ -12,24 +12,22 @@ fun <S, T, E> parseCompletely(p: Parser<S, T>, input: S): T? where S : Iterable<
             return output
         } else {
             val initials = rest.take(10)
-            println("Could not parse til end. Next tokens are $initials")
-            return null
+            error("Could not parse til end. Next tokens are $initials")
         }
     }
 }
 
-fun <T> parseStringCompletely(p: Parser<String, T>, input: String): T? {
+fun <T> parseStringCompletely(p: Parser<String, T>, input: String): T {
     val result = p.run(input)
     if (result == null) {
-        return null
+        error("Could not begin parsing")
     } else {
         val (rest, output) = result
         val first = rest.firstOrNull()
         if (first == null) {
             return output
         } else {
-            println("Could not parse til end. Next token is $first")
-            return null
+            error("Could not parse til end. Next token is $first")
         }
     }
 }

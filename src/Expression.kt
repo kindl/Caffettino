@@ -317,7 +317,7 @@ val import: Parser<Collection<Token>, Expression> = map(
 
 val topExpression = choice(listOf(import, let, function))
 
-fun parse(string: String): List<Expression>? {
+fun parseString(string: String): List<Expression> {
     val tokens = lex(string)
-    return tokens?.let { parseCompletely(many(topExpression), it) }
+    return parseCompletely(many(topExpression), tokens)
 }

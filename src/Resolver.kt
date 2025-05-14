@@ -316,8 +316,13 @@ fun accepts(parameterType: Type, argumentType: Type): Boolean {
         || (isArrayType(parameterType) && argumentType == emptyArrayType)
 }
 
+val classFileCache = mutableMapOf<String, ClassModel>()
+
 fun getClassFile(path: String): ClassModel {
-    // TODO find class by path, and allow non-system imports like import kotlin.io.Console
+    return classFileCache.getOrPut(path, { findClassFile(path) })
+}
+
+fun findClassFile(path: String): ClassModel {
     val bytes = if (path == "Any") {
         ClassLoader.getSystemResourceAsStream("java/lang/Object.class")?.readAllBytes()
     } else if (path == "string") {
@@ -327,6 +332,7 @@ fun getClassFile(path: String): ClassModel {
     } else if (path.startsWith("kotlin/")) {
         Any::class.java.getResourceAsStream(path + ".class")?.readAllBytes()
     } else {
+        // Allow reading archives and add a library folder
         Files.readAllBytes(Paths.get(path + ".class"))
     }
 

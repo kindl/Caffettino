@@ -18,12 +18,7 @@ class TestRun {
             }
 
             val text = Files.readString(file)
-            val parsed = parse(text)
-            if (parsed != null) {
-                generate(out, file.nameWithoutExtension, parsed)
-            } else {
-                error("Could not parse " + file.nameWithoutExtension)
-            }
+            generateAndWriteClassFile(out, file.nameWithoutExtension, text)
         }
     }
 
@@ -37,32 +32,56 @@ class TestRun {
             }
 
             val text = Files.readString(file)
-            val parsed = parse(text)
-            if (parsed != null) {
-                try {
-                    generate(out, file.nameWithoutExtension, parsed)
-                } catch (exception: Exception) {
-                    println("Successfully errored with message " + exception.message)
-                    continue
-                }
+            try {
+                generateAndWriteClassFile(out, file.nameWithoutExtension, text)
+            } catch (exception: Exception) {
+                println("Successfully errored with message " + exception.message)
+                continue
+            }
 
-                error("File " + file.nameWithoutExtension + " was supposed to fail.")
-            } else {
-                error("Could not parse " + file.nameWithoutExtension)
+            error("File " + file.nameWithoutExtension + " was supposed to fail.")
+        }
+    }
+
+    /*
+    @Test
+    fun `test jar`() {
+        val text = Files.readString(Path.of("test/valid/Server.ct"))
+        generateAndWriteJar(out, "Server", text)
+    }
+
+    // Useful for inspecting class files
+    @Test
+    fun `explore class`() {
+        // exploreTypes("java/util/List")
+        // exploreMethods("ForEachJava.class")
+        exploreMethods("ForEachJava.class")
+    }
+
+    fun exploreMethods(path: String) {
+        val bytes = Files.readAllBytes(Path.of(path))
+        val classFile = ClassFile.of().parse(bytes)
+        for (m in classFile.methods()) {
+            println("--------" + m.methodName().stringValue())
+            val elements = m.code().get().elements()
+
+            for (e in elements) {
+                println(e)
+                if (e is InvokeDynamicInstruction) {
+                    println("M" + e.bootstrapMethod())
+                    println("A" + e.bootstrapArgs())
+                    println("N" + e.name().stringValue())
+                    println("T" + e.type().stringValue())
+                }
             }
         }
     }
 
-    // Useful for inspecting class files
-    //@Test
-    fun `explore class`() {
-        // exploreClass("java/util/List")
-    }
-
-    fun exploreClass(path: String) {
+    fun exploreTypes(path: String) {
         val classFile = getClassFile(path)
         val methodTypes = classFile.methods().map { it.methodName().stringValue() + " " + convertMethodType(it.methodType().stringValue()) + " " + it }
         val fieldTypes = classFile.fields().map { it.fieldName().stringValue() + " " + convertFieldType(it.fieldType().stringValue()) }
         (methodTypes + fieldTypes).forEach { println(it) }
     }
+    */
 }

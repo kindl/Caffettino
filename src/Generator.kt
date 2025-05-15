@@ -398,14 +398,13 @@ fun generateVariable(context: Context, variable: Expression.Variable) {
             context.codeBuilder.loadLocal(typeKind, variable.info.index)
         }
 
-        is Info.Static -> if (variable.name.type is Type.Concrete) {
+        is Info.File -> if (variable.name.type is Type.Arrow) {
+            generateFunctionReference(context, variable)
+        } else {
             val fieldType = getClassDescriptor(variable.name.type)
-            val ownerType = variable.info.ownerType
+            val ownerType = getOwnerType(variable)
             val ownerTypeDescriptor = getClassDescriptor(ownerType)
             context.codeBuilder.getstatic(ownerTypeDescriptor, variable.name.identifier, fieldType)
-        } else {
-            generateFunctionVariable(context, variable)
-            // error("Cannot generate variable " + variable)
         }
 
         is Info.Outside -> {
@@ -415,9 +414,9 @@ fun generateVariable(context: Context, variable: Expression.Variable) {
     }
 }
 
-fun generateFunctionVariable(context: Context, variable: Expression.Variable) {
+fun generateFunctionReference(context: Context, variable: Expression.Variable) {
     val methodHandleName = variable.name.identifier
-    val methodHandleOwnerType = (variable.info as Info.Static).ownerType
+    val methodHandleOwnerType = getOwnerType(variable)
     val methodHandleOwnerTypeDescriptor = getClassDescriptor(methodHandleOwnerType)
     val methodHandleTypeDescriptor = getMethodTypeDescriptor(variable.name.type)
 
@@ -536,8 +535,8 @@ fun getMethodTypeDescriptor(type: Type): MethodTypeDesc {
 
 fun getOwnerType(expression: Expression): Type {
     return when (expression) {
-        is Expression.Let -> if (expression.info is Info.Static) { expression.info.ownerType } else { error("Cannot read owner type of " + expression) }
-        is Expression.Variable -> if (expression.info is Info.Static) { expression.info.ownerType } else { error("Cannot read owner type of " + expression) }
+        is Expression.Let -> if (expression.info is Info.File) { expression.info.ownerType } else { error("Cannot read owner type of " + expression) }
+        is Expression.Variable -> if (expression.info is Info.File) { expression.info.ownerType } else { error("Cannot read owner type of " + expression) }
         else -> error("Cannot read owner type of " + expression)
     }
 }

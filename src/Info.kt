@@ -1,7 +1,7 @@
 sealed class Info {
     data class Local(val index: Int) : Info()
     data class Outside(val unit: Unit) : Info()
-    data class Static(val ownerType: Type) : Info()
+    data class File(val ownerType: Type) : Info()
 }
 
 val unsetInfo = Info.Outside(Unit)
@@ -52,7 +52,7 @@ fun annotateLocals(expression: Expression, locals: List<Name>, statics: List<Nam
             if (index > -1) {
                 Expression.Variable(expression.name, Info.Local(index))
             } else if (statics.contains(expression.name)) {
-                Expression.Variable(expression.name, Info.Static(current))
+                Expression.Variable(expression.name, Info.File(current))
             } else { expression }
         }
         is Expression.Let -> {
@@ -61,9 +61,9 @@ fun annotateLocals(expression: Expression, locals: List<Name>, statics: List<Nam
             if (index > -1) {
                 Expression.Let(expression.name, annotated, Info.Local(index))
             } else if (statics.contains(expression.name)) {
-                Expression.Let(expression.name, annotated, Info.Static(current))
+                Expression.Let(expression.name, annotated, Info.File(current))
             } else {
-                Expression.Let(expression.name, annotated, Info.Static(current))
+                Expression.Let(expression.name, annotated, Info.File(current))
             }
         }
 

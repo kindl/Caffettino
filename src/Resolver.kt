@@ -265,8 +265,7 @@ fun getMethodType(type: Type, accessor: String, argumentTypes: List<Type>): Type
     }
 
     val path = (type as Type.Concrete).name
-    val classFile = getClassFile(path)
-    val options = getMethods(classFile).filter { it.methodName().stringValue() == accessor }
+    val options = getMethods(path).filter { it.methodName().stringValue() == accessor }
     val overloads = options.map { convertMethodType(it.methodType().stringValue()) }
 
     val methodType = overloads.firstOrNull { zipAccepts(it.parameterTypes, argumentTypes) }
@@ -322,7 +321,7 @@ fun getClassFile(path: String): ClassModel {
     return classFileCache.getOrPut(path, { findClassFile(path) })
 }
 
-fun findClassFile(path: String): ClassModel {
+fun findClassFileBytes(path: String): ByteArray {
     val bytes = if (path == "Any") {
         ClassLoader.getSystemResourceAsStream("java/lang/Object.class")?.readAllBytes()
     } else if (path == "string") {
@@ -340,16 +339,28 @@ fun findClassFile(path: String): ClassModel {
         error("Cannot open path " + path)
     }
 
+    println("Found " + path)
+
+    return bytes
+}
+
+fun findClassFile(path: String): ClassModel {
+    val bytes = findClassFileBytes(path)
     val classFile = ClassFile.of().parse(bytes)
     return classFile
 }
 
 // returns the methods including parent and interface methods
+fun getMethods(path: String): List<MethodModel> {
+    val classFile = getClassFile(path)
+    return getMethods(classFile)
+}
+
 fun getMethods(classModel: ClassModel): List<MethodModel> {
-    val superclassModel = classModel.superclass().map { getClassFile(it.name().stringValue()) }
-    val interfaceModels = classModel.interfaces().map { getClassFile(it.name().stringValue()) }
-    val superclassMethods = superclassModel.map { getMethods(it) }.orElse(emptyList())
-    val interfaceMethods = interfaceModels.flatMap { getMethods(it) }
+    val superclassPaths = classModel.superclass().map { it.name().stringValue() }
+    val interfacePaths = classModel.interfaces().map { it.name().stringValue() }
+    val superclassMethods = superclassPaths.map { getMethods(it) }.orElse(emptyList())
+    val interfaceMethods = interfacePaths.flatMap { getMethods(it) }
     return classModel.methods() + superclassMethods + interfaceMethods
 }
 

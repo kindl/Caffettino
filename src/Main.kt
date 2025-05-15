@@ -24,6 +24,13 @@ fun generateAndWriteClassFile(out: String, file: String, text: String) {
     Files.write(writePath, generated)
 }
 
+fun JarOutputStream.putFile(file: String, bytes: ByteArray) {
+    val entry = JarEntry(file + ".class")
+    this.putNextEntry(entry)
+    this.write(bytes)
+    this.closeEntry()
+}
+
 fun generateAndWriteJar(out: String, file: String, text: String) {
     val generated = generate(file, text)
 
@@ -34,14 +41,20 @@ fun generateAndWriteJar(out: String, file: String, text: String) {
 
     val writePath = out + "/" + file + ".jar"
     val jarOutputStream = JarOutputStream(FileOutputStream(writePath), manifest)
-    val entry = JarEntry(file + ".class")
-    jarOutputStream.putNextEntry(entry)
-    jarOutputStream.write(generated)
-    jarOutputStream.closeEntry()
+    jarOutputStream.putFile(file, generated)
 
-    // TODO add imported classes to archive
+    // add imported classes to archive
+    for (cached in classFileCache) {
+        val key = cached.key
+        if (!key.startsWith("java/") && key != "string" && key != "Any") {
+            val bytes = findClassFileBytes(key)
+            jarOutputStream.putFile(key, bytes)
+            println("Added imported " + key + " to jar")
+        }
+    }
 
     jarOutputStream.close()
+    println("Produced " + writePath)
 }
 
 fun main(args: Array<String>) {
@@ -52,7 +65,7 @@ fun main(args: Array<String>) {
         val path = Path.of(file)
         val text = Files.readString(path)
         generateAndWriteClassFile(".", file, text)
-    } else if (command == "build") {
+    } else if (command == "bundle") {
         val file = args[1]
         val path = Path.of(file)
         val text = Files.readString(path)

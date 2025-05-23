@@ -2,7 +2,8 @@ import java.lang.classfile.*
 import java.lang.constant.ConstantDescs
 import java.lang.reflect.AccessFlag
 import java.nio.file.Files
-import java.nio.file.Paths
+import java.nio.file.Path
+
 
 data class Environment(val types: Map<String, Type>)
 
@@ -332,7 +333,7 @@ fun findClassFileBytes(path: String): ByteArray {
         Any::class.java.getResourceAsStream(path + ".class")?.readAllBytes()
     } else {
         // Allow reading archives and add a library folder
-        Files.readAllBytes(Paths.get(path + ".class"))
+        Files.readAllBytes(Path.of(path + ".class"))
     }
 
     if (bytes == null) {

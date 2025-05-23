@@ -1,0 +1,80 @@
+import java.lang.System
+import java.lang.Thread
+import java.nio.file.Files
+import java.nio.file.LinkOption
+import java.nio.file.Path
+import java.nio.charset.Charset
+import java.net.ServerSocket
+import java.net.Socket
+import java.util.Scanner
+import Partial
+
+
+fn println(o) {
+    System.out.println(o)
+}
+
+@Parameters(string)
+fn getContentType(path) {
+    if (path.endsWith(".json")) {
+        return "application/json"
+    } else if (path.endsWith(".htm") || path.endsWith(".html")) {
+        return "text/html"
+    } else if (path.endsWith("js")) {
+        return "text/javascript"
+    } else if (path.endsWith(".png")) {
+        return "image/png"
+    } else if (path.endsWith(".txt") || path.endsWith(".md")) {
+        return "text/plain"
+    } else if (path.endsWith(".pdf")) {
+        return "application/pdf"
+    } else if (path.endsWith(".css")) {
+        return "text/css"
+    } else {
+        return "application/octet-stream"
+    }
+}
+
+@Parameters(Socket)
+fn threadRun(connection) {
+    let charset = Charset.forName("UTF-8")
+
+    let inputStream = connection.getInputStream()
+    let scanner = Scanner(inputStream)
+    let method = scanner.next()
+    let path = scanner.next()
+    println($"Connection {method} {path}")
+
+    let outputStream = connection.getOutputStream()
+    let filePath = Path.of("." + path, emptyArray())
+
+    if (method == "GET" && Files.exists(filePath, emptyArray())) {
+        let contentType = getContentType(path)
+        let httpHeader = $"HTTP/1.1 200 OK\r\nContent-Type: {contentType}\r\n\r\n"
+        let contents = Files.readAllBytes(filePath)
+        outputStream.write(httpHeader.getBytes(charset))
+        outputStream.write(contents)
+        println("Found")
+    } else {
+        let message = $"HTTP/1.1 404 NOT FOUND\r\nContent-Type: text/html\r\n\r\n<html><body><h1>Not found {path}</h1></body></html>"
+        outputStream.write(message.getBytes(charset))
+        println("Not found")
+    }
+
+    connection.close()
+    println("Connection closed")
+}
+
+@Parameters(ServerSocket)
+fn waitForConnection(serverSocket) {
+    let connection = serverSocket.accept()
+    let thread = Thread(Partial.toRunnable(threadRun, connection))
+    thread.start()
+}
+
+fn main() {
+    let port = 8080
+    let serverSocket = ServerSocket(port)
+    println($"Server running at port {port}")
+    Partial.forever(Partial.toRunnable(waitForConnection, serverSocket))
+}

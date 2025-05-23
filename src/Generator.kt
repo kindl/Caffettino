@@ -428,8 +428,12 @@ fun generateFunctionReference(context: Context, variable: Expression.Variable) {
     val bootstrapMethod = getBootstrapMethod()
 
     // TODO better way to find out what type of interface is used
-    val returnType = (variable.name.type as Type.Arrow).returnType
-    val parameterTypes = (variable.name.type as Type.Arrow).parameterTypes
+    if (variable.name.type !is Type.Arrow) {
+        error("Expected an arrow type to generate a function reference, but was " + variable.name.type)
+    }
+
+    val returnType = variable.name.type.returnType
+    val parameterTypes = variable.name.type.parameterTypes
 
     val (invocationName, invocationType, functionType) = if (returnType == Type.Concrete("void") && parameterTypes.count() == 1) {
         val invocationName = "accept"

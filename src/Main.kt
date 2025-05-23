@@ -60,17 +60,21 @@ fun generateAndWriteJar(out: String, file: String, text: String) {
 fun main(args: Array<String>) {
     val command = args.firstOrNull()
 
-    if (command == "compile") {
-        val file = args[1]
-        val path = Path.of(file)
-        val text = Files.readString(path)
-        generateAndWriteClassFile(".", file, text)
-    } else if (command == "bundle") {
-        val file = args[1]
-        val path = Path.of(file)
-        val text = Files.readString(path)
-        generateAndWriteJar(".", file, text)
-    } else {
-        println("Unknown command " + command)
+    when (command) {
+        "compile" -> {
+            val file = args[1]
+            val path = Path.of(file)
+            val text = Files.readString(path)
+            generateAndWriteClassFile(".", file, text)
+        }
+        "bundle" -> {
+            val file = args[1]
+            val path = Path.of(file)
+            val text = Files.readString(path)
+            generateAndWriteJar(".", file, text)
+        }
+        else -> {
+            println("Unknown command " + command)
+        }
     }
 }

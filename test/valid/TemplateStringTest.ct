@@ -1,10 +1,24 @@
 // Test template string
 import java.lang.System
 
+let d = 1.0
+let f = 1.0f
+let i = 1
+let l = 1L
+let b = true
+let s = "Just a string"
+
+let empty = ""
+let emptyTemplate = $""
+let onlyExpression = $"{s}"
+let noExpression = $"Hello World"
+let prefixed = $" {s}"
+let suffixed = $"{s} "
+let inBetween = $" {s} "
+let several = $"{s} {d}"
+let compare = $"The values {f} and {d} are numbers"
+let allTypes = $"This string tests if all types are converted properly {d} {f} {i} {l} {b} {s}"
+
 fn main() {
-    System.out.println("Enter your name:")
-    let console = System.console()
-    let name = console.readLine()
-    let formatted = $"Hi {name}!"
-    System.out.println(formatted)
+    System.out.println(allTypes)
 }

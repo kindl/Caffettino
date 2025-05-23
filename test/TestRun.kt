@@ -43,12 +43,14 @@ class TestRun {
         }
     }
 
-    /*
+    // Wont run yet, because of pathing
     @Test
     fun `test jar`() {
-        val text = Files.readString(Path.of("test/valid/Server.ct"))
+        val text = Files.readString(Path.of("examples/Server.ct"))
         generateAndWriteJar(out, "Server", text)
     }
+
+    /*
 
     // Useful for inspecting class files
     @Test

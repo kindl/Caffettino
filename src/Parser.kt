@@ -154,7 +154,8 @@ fun satisfyChar(predicate: (Char) -> Boolean): Parser<String, Char> {
 
 fun takeWhile(predicate: (Char) -> Boolean): Parser<String, String> {
     return Parser { input ->
-        Pair(input.dropWhile(predicate), input.takeWhile(predicate))
+        let s = input.takeWhile(predicate)
+        Pair(input.drop(s.length), s)
     }
 }
 

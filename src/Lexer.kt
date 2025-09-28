@@ -50,7 +50,7 @@ val expressionPart =
     second(satisfyChar { it == '{' }, manyWithEnd(defer { lexeme }, satisfyChar { it == '}' }))
 
 val templateStringBegin =
-    map2({ _, _ -> Token.TemplateStringBeginToken("") }, satisfyChar { it == '$' }, satisfyChar { it == '\"' })
+    replace(Token.TemplateStringBeginToken(""), takeString("$\""))
 
 val templateStringEnd =
     replace(Token.TemplateStringEndToken(""), satisfyChar { it == '\"' })

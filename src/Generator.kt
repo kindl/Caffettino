@@ -46,8 +46,6 @@ fun generateEmptyConstructor(classBuilder: ClassBuilder) {
                     .return_()
             }
         }
-
-
 }
 
 // generate a static field for a let expression
